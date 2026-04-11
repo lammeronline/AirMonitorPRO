@@ -26,6 +26,9 @@ header{display:flex;justify-content:space-between;align-items:center;
 .hdr-title{font-size:15px;font-weight:600}
 .hdr-badge{background:var(--bg4);border:1px solid var(--line);border-radius:6px;
   padding:4px 10px;font-size:12px;color:var(--sub2);font-family:monospace}
+.hdr-badge.live{color:#86efac;border-color:#14532d;background:#0f1f18}
+.hdr-badge.connecting{color:#fcd34d;border-color:#92400e;background:#1f1720}
+.hdr-badge.offline{color:#cbd5e1;border-color:#475569;background:#172033}
 .icon-btn{background:var(--bg3);border:1px solid var(--line);border-radius:8px;
   width:34px;height:34px;display:flex;align-items:center;justify-content:center;
   cursor:pointer;font-size:15px;color:var(--sub2);transition:border-color .2s}
@@ -64,6 +67,18 @@ main{max-width:1100px;margin:0 auto;padding:16px}
 .aqi-desc{font-size:13px;font-weight:600;margin-bottom:6px}
 .aqi-dots{display:flex;gap:5px}
 .aqi-dots span{flex:1;height:8px;border-radius:4px;background:var(--bg4);transition:background .4s}
+body.offline .card,
+body.offline .chart-card,
+body.offline .status-bar,
+body.offline #warmup-bar{filter:grayscale(1);opacity:.68}
+body.offline .card::before{background:#64748b!important}
+body.offline .card-value,
+body.offline .aqi-num,
+body.offline .aqi-desc,
+body.offline .level-label,
+body.offline .status-dot span,
+body.offline #s-ip,
+body.offline #s-ver{color:#94a3b8!important}
 /* Warmup */
 #warmup-bar{display:none;background:var(--bg2);border:1px solid #92400e;
   border-radius:var(--r);padding:10px 16px;margin-bottom:12px;align-items:center;gap:10px}
@@ -173,6 +188,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <span style="font-size:18px">🌿</span>
     <span class="hdr-title">Air Monitor</span>
     <div class="hdr-badge" id="hdr-time">--:-- --.--.----</div>
+    <div class="hdr-badge connecting" id="hdr-conn">Connecting</div>
   </div>
   <div style="display:flex;gap:8px">
     <div class="icon-btn" onclick="openSettings()">⚙</div>
@@ -601,11 +617,45 @@ const ENS_ST=['Operating ok','Warm-up','Initial Start-up','No valid output'];
 
 // ═══════════════ WebSocket ═══════════════
 let ws,reconnT;
+let lastDataTs=0;
+let isOffline=true;
+const DATA_TIMEOUT_MS=10000;
+const pageStartTs=Date.now();
+function setConnBadge(state){
+  const el=document.getElementById('hdr-conn');
+  if(!el) return;
+  el.className='hdr-badge '+state;
+  el.textContent=state==='live'?'Live':state==='connecting'?'Connecting':'Offline';
+}
+function setOfflineState(next){
+  if(isOffline===next) return;
+  isOffline=next;
+  document.body.classList.toggle('offline',next);
+}
+function markDataAlive(){
+  lastDataTs=Date.now();
+  setOfflineState(false);
+  setConnBadge('live');
+}
+function checkDataTimeout(){
+  const sinceTs=lastDataTs||pageStartTs;
+  if(Date.now()-sinceTs>DATA_TIMEOUT_MS){
+    setOfflineState(true);
+    setConnBadge('offline');
+  }
+}
 function connectWS(){
+  setConnBadge(lastDataTs?'offline':'connecting');
   ws=new WebSocket('ws://'+location.hostname+':81/');
-  ws.onopen=()=>clearTimeout(reconnT);
+  ws.onopen=()=>{clearTimeout(reconnT);setConnBadge(lastDataTs?'offline':'connecting');};
   ws.onmessage=e=>handleMsg(JSON.parse(e.data));
-  ws.onclose=()=>{reconnT=setTimeout(connectWS,3000)};
+  ws.onclose=()=>{
+    if(Date.now()-lastDataTs>DATA_TIMEOUT_MS || !lastDataTs){
+      setOfflineState(true);
+      setConnBadge('offline');
+    }
+    reconnT=setTimeout(connectWS,3000);
+  };
   ws.onerror=()=>ws.close();
 }
 function handleMsg(d){
@@ -614,6 +664,7 @@ function handleMsg(d){
   if(d.type==='scan')     renderNets(d.networks);
 }
 function updateData(d){
+  markDataAlive();
   document.getElementById('hdr-time').textContent=(d.time_short||'--:--')+'  '+(d.date||'');
   document.getElementById('v-temp').textContent=d.temp.toFixed(1);
   document.getElementById('v-hum').textContent=d.hum.toFixed(1);
@@ -819,6 +870,7 @@ function doCalibrate(){
 }
 
 connectWS();
+setInterval(checkDataTimeout,1000);
 </script>
 </body>
 </html>
