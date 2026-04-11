@@ -1,5 +1,6 @@
 #include "telegram_module.h"
 #include "config.h"
+#include "wifi_manager.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
@@ -26,8 +27,18 @@ static uint32_t _lastAlertHum  = 0;
 
 static const uint32_t POLL_INTERVAL  = 5000UL;
 static const uint32_t ALERT_COOLDOWN = 300000UL;  // 5 min
+static const uint32_t WIFI_STABLE_MS = 5000UL;
+static const uint32_t API_FAIL_COOLDOWN_MS = 15000UL;
+static const uint32_t TLS_LOG_INTERVAL_MS = 30000UL;
 
 static WiFiClientSecure _tls;
+static uint32_t _nextApiAttempt = 0;
+static uint32_t _lastTlsFailLog = 0;
+static bool     _startupMsgSent = false;
+
+static bool _wifiReady() {
+    return WifiManager::isStableConnected(WIFI_STABLE_MS);
+}
 
 // ─────────────────────────────────────────────────────────
 static void _loadPrefs() {
@@ -66,12 +77,19 @@ ThresholdConfig getThresholds() {
 
 // ─────────────────────────────────────────────────────────
 static String _apiPost(const String& method, const String& body) {
-    if (!WiFi.isConnected() || _token.isEmpty()) return "";
+    uint32_t now = millis();
+    if (!_wifiReady() || _token.isEmpty()) return "";
+    if (_nextApiAttempt && now < _nextApiAttempt) return "";
     _tls.setInsecure();
     if (!_tls.connect("api.telegram.org", 443)) {
-        DBGLN("[TG] TLS connect failed");
+        if (now - _lastTlsFailLog >= TLS_LOG_INTERVAL_MS) {
+            _lastTlsFailLog = now;
+            DBGLN("[TG] TLS connect failed");
+        }
+        _nextApiAttempt = now + API_FAIL_COOLDOWN_MS;
         return "";
     }
+    _nextApiAttempt = 0;
     String url = "/bot" + _token + "/" + method;
     String req = "POST " + url + " HTTP/1.1\r\n"
                  "Host: api.telegram.org\r\n"
@@ -184,9 +202,6 @@ void begin() {
     }
     DBGF("[TG] Ready chat_id=%s CO2thr=%d AQIthr=%d\n",
          _chatId.c_str(), _thr_co2, _thr_aqi);
-    sendMessage("🟢 <b>Air Monitor PRO</b> запущен!\nIP: " +
-                WiFi.localIP().toString() +
-                "\nПороги: CO₂&gt;"+String(_thr_co2)+" AQI≥"+String(_thr_aqi));
 }
 
 void loop(const SensorData& d, const SystemStatus& s) {
@@ -194,6 +209,15 @@ void loop(const SensorData& d, const SystemStatus& s) {
     uint32_t now = millis();
     if (now - _lastPoll < POLL_INTERVAL) return;
     _lastPoll = now;
+    if (!_wifiReady()) return;
+
+    if (!_startupMsgSent) {
+        if (sendMessage("🟢 <b>Air Monitor PRO</b> запущен!\nIP: " +
+                        WiFi.localIP().toString() +
+                        "\nПороги: CO₂&gt;"+String(_thr_co2)+" AQI≥"+String(_thr_aqi))) {
+            _startupMsgSent = true;
+        }
+    }
 
     if (d.co2 > _thr_co2 && (now-_lastAlertCO2 > ALERT_COOLDOWN)) {
         _lastAlertCO2 = now;
