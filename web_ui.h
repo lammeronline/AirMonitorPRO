@@ -273,9 +273,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-temp)"></div>TEMP</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('temp','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('temp','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('temp','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('temp','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('temp','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('temp','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cTemp"></canvas></div>
@@ -284,9 +284,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-hum)"></div>HUM</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('hum','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('hum','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('hum','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('hum','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('hum','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('hum','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cHum"></canvas></div>
@@ -295,9 +295,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-co2)"></div>ECO2</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('co2','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('co2','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('co2','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('co2','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('co2','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('co2','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cCO2"></canvas></div>
@@ -306,9 +306,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-tvoc)"></div>TVOC</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('tvoc','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('tvoc','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('tvoc','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('tvoc','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('tvoc','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('tvoc','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cTVOC"></canvas></div>
@@ -478,6 +478,18 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
   <!-- System -->
   <div class="tab-pane" id="tab-sys">
     <div class="form-section">
+      <div class="form-section-title">History & Logging</div>
+      <div class="form-row">
+        <div class="form-group"><label>CSV interval, sec</label><input id="csv-int-s" type="number" value="60" min="30" max="3600"></div>
+        <div class="form-group"><label>24h chart, min</label><input id="hist24-min" type="number" value="5" min="5" max="60"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>7d chart, min</label><input id="hist7-min" type="number" value="60" min="30" max="720"></div>
+        <div class="form-group"><label>30d chart, min</label><input id="hist30-min" type="number" value="360" min="60" max="1440"></div>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary btn-full" onclick="saveHistorySettings()">💾 Save History Settings</button></div>
+    </div>
+    <div class="form-section">
       <div class="form-section-title">Device Info</div>
       <div style="font-size:12px;color:var(--sub2);line-height:2.2">
         Firmware: <span id="sys-ver" style="color:var(--text)">-</span><br>
@@ -514,9 +526,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
 
 <script>
 // ═══════════════ Chart setup ═══════════════
-const MAX_PTS = 1440;
-const store = {temp:{A:[],H:[],M:[]},hum:{A:[],H:[],M:[]},co2:{A:[],H:[],M:[]},tvoc:{A:[],H:[],M:[]}};
-const ranges = {temp:'A',hum:'A',co2:'A',tvoc:'A'};
+const historyCache = {'24h':null,'7d':null,'30d':null};
+const historyRev = {'24h':0,'7d':0,'30d':0};
+const ranges = {temp:'24h',hum:'24h',co2:'24h',tvoc:'24h'};
 
 const mkChart = (id,color) => new Chart(document.getElementById(id),{
   type:'line',
@@ -543,23 +555,12 @@ const charts = {
   tvoc:mkChart('cTVOC','rgba(251,146,60,1)'),
 };
 
-function pushPt(key,label,value){
-  const pt={label,value};
-  ['A','H','M'].forEach(r=>{
-    store[key][r].push(pt);
-    if(store[key][r].length>MAX_PTS) store[key][r].shift();
-  });
-  renderChart(key);
-}
-
 function renderChart(key){
   const r=ranges[key];
-  let pts=store[key][r];
-  if(r==='H') pts=pts.slice(-60);
-  if(r==='M') pts=pts.slice(-10);
+  const hist=historyCache[r];
   const c=charts[key];
-  c.data.labels=pts.map(p=>p.label);
-  c.data.datasets[0].data=pts.map(p=>p.value);
+  c.data.labels=hist&&hist.labels?hist.labels:[];
+  c.data.datasets[0].data=hist&&hist[key]?hist[key]:[];
   c.update('none');
 }
 
@@ -567,25 +568,18 @@ function setRange(key,r,btn){
   ranges[key]=r;
   btn.closest('.chart-controls').querySelectorAll('.chart-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  renderChart(key);
+  if(!historyCache[r]) loadHistoryRange(r);
+  else renderChart(key);
 }
 
-// ═══════════════ History preload ═══════════════
-fetch('/api/history').then(r=>r.json()).then(h=>{
-  if(!h||!h.temp) return;
-  const n=h.temp.length;
-  for(let i=0;i<n;i++){
-    const lbl=String(i);
-    ['A','H','M'].forEach(r=>{
-      if(h.temp[i]!==undefined) store.temp[r].push({label:lbl,value:h.temp[i]});
-      if(h.hum[i] !==undefined) store.hum[r].push( {label:lbl,value:h.hum[i]});
-      if(h.co2[i] !==undefined) store.co2[r].push(  {label:lbl,value:h.co2[i]});
-      if(h.tvoc[i]!==undefined) store.tvoc[r].push( {label:lbl,value:h.tvoc[i]});
-    });
-  }
-  Object.keys(charts).forEach(renderChart);
-  console.log('[History] Loaded',n,'points from device');
-}).catch(()=>{});
+function loadHistoryRange(range){
+  return fetch('/api/history?range='+encodeURIComponent(range)).then(r=>r.json()).then(h=>{
+    if(!h||!h.labels) return;
+    historyCache[range]=h;
+    Object.keys(charts).forEach(k=>{if(ranges[k]===range)renderChart(k);});
+    console.log('[History] Loaded',range,h.n,'points');
+  }).catch(()=>{});
+}
 
 // ═══════════════ Level helpers ═══════════════
 function setLevel(id,pct,label){
@@ -685,9 +679,9 @@ function updateData(d){
     document.getElementById('warmup-fill').style.width=(d.warmup_pct||0)+'%';
   } else wb.classList.remove('show');
 
-  const lbl=d.time_short||'';
-  pushPt('temp',lbl,d.temp); pushPt('hum',lbl,d.hum);
-  if(ensSt===0){pushPt('co2',lbl,d.co2);pushPt('tvoc',lbl,d.tvoc);}
+  maybeReloadHistory('24h',d.hist24_rev);
+  maybeReloadHistory('7d',d.hist7_rev);
+  maybeReloadHistory('30d',d.hist30_rev);
 
   setDot('d-aht',d.aht,'s-aht','AHT21');
   const ensLbl='ENS160 ('+ENS_ST[ensSt]+')';
@@ -714,6 +708,12 @@ function setDot(did,ok,sid,label){
   document.getElementById(sid).textContent=label+(ok?' OK':' ERR');
 }
 function fmtUp(s){return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';}
+function maybeReloadHistory(range,rev){
+  if(rev===undefined||rev===null) return;
+  if(historyRev[range]===rev) return;
+  historyRev[range]=rev;
+  if(Object.values(ranges).includes(range)) loadHistoryRange(range);
+}
 
 // ═══════════════ Settings ═══════════════
 function openSettings(){
@@ -742,6 +742,10 @@ function applySettings(d){
   if(d.thr_aqi)     document.getElementById('thr-aqi').value=d.thr_aqi;
   if(d.thr_temp_hi) document.getElementById('thr-temp').value=d.thr_temp_hi;
   if(d.thr_hum_hi)  document.getElementById('thr-hum').value=d.thr_hum_hi;
+  if(d.csv_int_s)   document.getElementById('csv-int-s').value=d.csv_int_s;
+  if(d.hist24_min)  document.getElementById('hist24-min').value=d.hist24_min;
+  if(d.hist7_min)   document.getElementById('hist7-min').value=d.hist7_min;
+  if(d.hist30_min)  document.getElementById('hist30-min').value=d.hist30_min;
 }
 function saveWifi(){
   const ssid=document.getElementById('cfg-ssid').value.trim();
@@ -779,6 +783,20 @@ function saveTG(){
       tg_token:document.getElementById('tg-token').value,
       tg_chatid:document.getElementById('tg-chatid').value})
   }).then(()=>alert('Telegram saved'));
+}
+function saveHistorySettings(){
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      csv_int_s:+document.getElementById('csv-int-s').value||60,
+      hist24_min:+document.getElementById('hist24-min').value||5,
+      hist7_min:+document.getElementById('hist7-min').value||60,
+      hist30_min:+document.getElementById('hist30-min').value||360
+    })
+  }).then(()=>{
+    historyCache['24h']=null; historyCache['7d']=null; historyCache['30d']=null;
+    loadHistoryRange('24h'); loadHistoryRange('7d'); loadHistoryRange('30d');
+    alert('History settings saved');
+  });
 }
 function testTG(){fetch('/api/tg_test').then(r=>r.text()).then(t=>alert('Response: '+t));}
 
@@ -870,6 +888,9 @@ function doCalibrate(){
 }
 
 connectWS();
+loadHistoryRange('24h');
+loadHistoryRange('7d');
+loadHistoryRange('30d');
 setInterval(checkDataTimeout,1000);
 </script>
 </body>

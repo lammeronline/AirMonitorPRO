@@ -59,6 +59,24 @@ void loop() {
 
 bool isOK() { return _rtcOK || _ntpSynced; }
 
+bool hasValidTime() {
+    if (_rtcOK) {
+        DateTime dt = _rtc.now();
+        return dt.year() >= 2024;
+    }
+    time_t now = time(nullptr);
+    return now > 1704067200;
+}
+
+uint32_t getEpoch() {
+    if (_rtcOK) {
+        DateTime dt = _rtc.now();
+        if (dt.year() >= 2024) return dt.unixtime();
+    }
+    time_t now = time(nullptr);
+    return now > 1704067200 ? (uint32_t)now : 0;
+}
+
 String getTimeString() {
     if (_rtcOK) {
         DateTime dt = _rtc.now();

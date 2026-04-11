@@ -7,6 +7,7 @@
 #include "mqtt_module.h"
 #include "telegram_module.h"
 #include "sd_logger.h"
+#include "runtime_settings.h"
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
@@ -95,6 +96,11 @@ static void _wsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t len) {
         resp["thr_aqi"]     = _prefs.getInt("thr_aqi",        3);
         resp["thr_temp_hi"] = _prefs.getFloat("thr_temp_hi",30.0f);
         resp["thr_hum_hi"]  = _prefs.getFloat("thr_hum_hi", 75.0f);
+        auto cfg = RuntimeSettings::get();
+        resp["csv_int_s"]   = cfg.csv_interval_sec;
+        resp["hist24_min"]  = cfg.hist24_interval_min;
+        resp["hist7_min"]   = cfg.hist7_interval_min;
+        resp["hist30_min"]  = cfg.hist30_interval_min;
         _prefs.end();
         String out; serializeJson(resp, out);
         _ws.sendTXT(num, out);
@@ -153,7 +159,12 @@ static void _registerRoutes() {
         if(doc.containsKey("tg_en"))      _prefs.putBool("tg_en",     doc["tg_en"]);
         if(doc.containsKey("tg_token"))   _prefs.putString("tg_token", doc["tg_token"].as<String>());
         if(doc.containsKey("tg_chatid"))  _prefs.putString("tg_chatid",doc["tg_chatid"].as<String>());
+        if(doc.containsKey("csv_int_s"))  _prefs.putInt("csv_int_s",  doc["csv_int_s"]);
+        if(doc.containsKey("hist24_min")) _prefs.putInt("hist24_min", doc["hist24_min"]);
+        if(doc.containsKey("hist7_min"))  _prefs.putInt("hist7_min",  doc["hist7_min"]);
+        if(doc.containsKey("hist30_min")) _prefs.putInt("hist30_min", doc["hist30_min"]);
         _prefs.end();
+        RuntimeSettings::reload();
         MQTTModule::reload();
         _http.send(200,"text/plain","OK");
     });
@@ -292,6 +303,9 @@ void broadcastData(const SensorData& d, const SystemStatus& s) {
         : 100.0f;
     doc["mqtt"]       = MQTTModule::isConnected();
     doc["tg"]         = TelegramModule::isEnabled();
+    doc["hist24_rev"] = s.hist24_rev;
+    doc["hist7_rev"]  = s.hist7_rev;
+    doc["hist30_rev"] = s.hist30_rev;
     String out; serializeJson(doc,out);
     _ws.broadcastTXT(out);
 }
@@ -303,5 +317,9 @@ void sendJSON(const String& json) {
 
 uint8_t connectedClients() {
     return _ws.connectedClients();
+}
+
+String arg(const String& name) {
+    return _http.arg(name);
 }
 } // namespace WebServerModule
