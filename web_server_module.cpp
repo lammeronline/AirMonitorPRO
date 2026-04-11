@@ -300,4 +300,8 @@ void sendJSON(const String& json) {
     _http.sendHeader("Access-Control-Allow-Origin","*");
     _http.send(200,"application/json",json);
 }
+
+uint8_t connectedClients() {
+    return _ws.connectedClients();
+}
 } // namespace WebServerModule

@@ -30,11 +30,17 @@ static const uint32_t ALERT_COOLDOWN = 300000UL;  // 5 min
 static const uint32_t WIFI_STABLE_MS = 5000UL;
 static const uint32_t API_FAIL_COOLDOWN_MS = 15000UL;
 static const uint32_t TLS_LOG_INTERVAL_MS = 30000UL;
+static const uint32_t API_READ_TIMEOUT_MS = 1200UL;
+static const uint32_t API_TOTAL_TIMEOUT_MS = 2500UL;
+static const uint32_t API_HEALTH_LOG_MS = 60000UL;
 
 static WiFiClientSecure _tls;
 static uint32_t _nextApiAttempt = 0;
 static uint32_t _lastTlsFailLog = 0;
 static bool     _startupMsgSent = false;
+static uint32_t _lastApiMs = 0;
+static uint32_t _apiFailCount = 0;
+static uint32_t _lastApiHealthLog = 0;
 
 static bool _wifiReady() {
     return WifiManager::isStableConnected(WIFI_STABLE_MS);
@@ -80,11 +86,16 @@ static String _apiPost(const String& method, const String& body) {
     uint32_t now = millis();
     if (!_wifiReady() || _token.isEmpty()) return "";
     if (_nextApiAttempt && now < _nextApiAttempt) return "";
+    _tls.stop();
     _tls.setInsecure();
+    _tls.setTimeout(API_READ_TIMEOUT_MS);
+    uint32_t t0 = millis();
     if (!_tls.connect("api.telegram.org", 443)) {
+        _lastApiMs = millis() - t0;
+        _apiFailCount++;
         if (now - _lastTlsFailLog >= TLS_LOG_INTERVAL_MS) {
             _lastTlsFailLog = now;
-            DBGLN("[TG] TLS connect failed");
+            DBGF("[TG] TLS connect failed (%ums)\n", (unsigned)_lastApiMs);
         }
         _nextApiAttempt = now + API_FAIL_COOLDOWN_MS;
         return "";
@@ -100,15 +111,18 @@ static String _apiPost(const String& method, const String& body) {
 
     String resp = "";
     bool   inHeaders = true;
-    uint32_t t0 = millis();
-    while ((_tls.connected() || _tls.available()) && (millis() - t0 < 8000)) {
+    while ((_tls.connected() || _tls.available()) &&
+           (millis() - t0 < API_TOTAL_TIMEOUT_MS)) {
         if (_tls.available()) {
             String line = _tls.readStringUntil('\n');
             if (inHeaders) { if (line == "\r") inHeaders = false; }
             else resp += line;
         }
+        yield();
     }
+    _lastApiMs = millis() - t0;
     _tls.stop();
+    DBGF("[TG] %s %ums\n", method.c_str(), (unsigned)_lastApiMs);
     return resp;
 }
 
@@ -166,13 +180,17 @@ static void _pollUpdates(const SensorData& d, const SystemStatus& s) {
         String text = upd["message"]["text"].as<String>();
         DBGF("[TG] cmd: %s\n", text.c_str());
 
-        if (text=="/status"||text=="/start") sendMessage(_buildStatus(d,s));
+        if (text=="/status"||text=="/start") {
+            sendMessage(_buildStatus(d,s));
+            return;
+        }
         else if (text=="/report") {
             DynamicJsonDocument jd(256);
             jd["temp"]=d.temp; jd["hum"]=d.hum; jd["co2"]=d.co2;
             jd["tvoc"]=d.tvoc; jd["aqi"]=d.aqi; jd["time"]=s.time_str;
             String jstr; serializeJson(jd,jstr);
             sendMessage("<pre>"+jstr+"</pre>");
+            return;
         }
         else if (text=="/thresholds") {
             sendMessage("⚙️ <b>Текущие пороги алертов:</b>\n"
@@ -181,6 +199,7 @@ static void _pollUpdates(const SensorData& d, const SystemStatus& s) {
                         "Температура &gt; " + String(_thr_temp_hi,1) + " °C\n"
                         "Влажность &gt; "   + String(_thr_hum_hi,1)  + " %\n\n"
                         "<i>Изменить: Settings → Telegram → Thresholds</i>");
+            return;
         }
         else if (text=="/reboot") {
             sendMessage("🔄 Перезагружаюсь..."); delay(500); ESP.restart();
@@ -190,8 +209,44 @@ static void _pollUpdates(const SensorData& d, const SystemStatus& s) {
                         "/status — показатели\n/report — JSON\n"
                         "/thresholds — пороги алертов\n"
                         "/reboot — перезагрузка\n/help — справка");
+            return;
         }
     }
+}
+
+static bool _sendAlertIfDue(const SensorData& d, uint32_t now) {
+    if (d.co2 > _thr_co2 && (now - _lastAlertCO2 > ALERT_COOLDOWN)) {
+        if (sendMessage("⚠️ <b>Высокий CO₂!</b>\nТекущий: <b>"+String(d.co2)+
+                        " ppm</b>\nПорог: "+String(_thr_co2)+" ppm\n\nПроветрите!")) {
+            _lastAlertCO2 = now;
+        }
+        return true;
+    }
+    if (d.aqi >= _thr_aqi && (now - _lastAlertAQI > ALERT_COOLDOWN)) {
+        const char* lvl = d.aqi==3?"умеренный":d.aqi==4?"плохой":"опасный";
+        if (sendMessage("🔴 <b>Плохой воздух!</b>\nAQI: <b>"+String(d.aqi)+
+                        "/5 ("+lvl+")</b>\nTVOC: "+String(d.tvoc)+" ppb")) {
+            _lastAlertAQI = now;
+        }
+        return true;
+    }
+    if (d.temp > _thr_temp_hi && (now - _lastAlertTemp > ALERT_COOLDOWN)) {
+        if (sendMessage("🌡 <b>Высокая температура!</b>\n<b>"+
+                        String(d.temp,1)+" °C</b> (порог: "+
+                        String(_thr_temp_hi,1)+" °C)")) {
+            _lastAlertTemp = now;
+        }
+        return true;
+    }
+    if (d.hum > _thr_hum_hi && (now - _lastAlertHum > ALERT_COOLDOWN)) {
+        if (sendMessage("💧 <b>Высокая влажность!</b>\n<b>"+
+                        String(d.hum,1)+" %</b> (порог: "+
+                        String(_thr_hum_hi,1)+" %)")) {
+            _lastAlertHum = now;
+        }
+        return true;
+    }
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -211,37 +266,23 @@ void loop(const SensorData& d, const SystemStatus& s) {
     _lastPoll = now;
     if (!_wifiReady()) return;
 
+    if (_lastApiHealthLog == 0 || now - _lastApiHealthLog >= API_HEALTH_LOG_MS) {
+        _lastApiHealthLog = now;
+        DBGF("[TG] health lastApi=%ums fails=%u cooldown=%s\n",
+             (unsigned)_lastApiMs, (unsigned)_apiFailCount,
+             (_nextApiAttempt && now < _nextApiAttempt) ? "yes" : "no");
+    }
+
     if (!_startupMsgSent) {
         if (sendMessage("🟢 <b>Air Monitor PRO</b> запущен!\nIP: " +
                         WiFi.localIP().toString() +
                         "\nПороги: CO₂&gt;"+String(_thr_co2)+" AQI≥"+String(_thr_aqi))) {
             _startupMsgSent = true;
         }
+        return;
     }
 
-    if (d.co2 > _thr_co2 && (now-_lastAlertCO2 > ALERT_COOLDOWN)) {
-        _lastAlertCO2 = now;
-        sendMessage("⚠️ <b>Высокий CO₂!</b>\nТекущий: <b>"+String(d.co2)+
-                    " ppm</b>\nПорог: "+String(_thr_co2)+" ppm\n\nПроветрите!");
-    }
-    if (d.aqi >= _thr_aqi && (now-_lastAlertAQI > ALERT_COOLDOWN)) {
-        _lastAlertAQI = now;
-        const char* lvl = d.aqi==3?"умеренный":d.aqi==4?"плохой":"опасный";
-        sendMessage("🔴 <b>Плохой воздух!</b>\nAQI: <b>"+String(d.aqi)+
-                    "/5 ("+lvl+")</b>\nTVOC: "+String(d.tvoc)+" ppb");
-    }
-    if (d.temp > _thr_temp_hi && (now-_lastAlertTemp > ALERT_COOLDOWN)) {
-        _lastAlertTemp = now;
-        sendMessage("🌡 <b>Высокая температура!</b>\n<b>"+
-                    String(d.temp,1)+" °C</b> (порог: "+
-                    String(_thr_temp_hi,1)+" °C)");
-    }
-    if (d.hum > _thr_hum_hi && (now-_lastAlertHum > ALERT_COOLDOWN)) {
-        _lastAlertHum = now;
-        sendMessage("💧 <b>Высокая влажность!</b>\n<b>"+
-                    String(d.hum,1)+" %</b> (порог: "+
-                    String(_thr_hum_hi,1)+" %)");
-    }
+    if (_sendAlertIfDue(d, now)) return;
 
     _pollUpdates(d, s);
 }

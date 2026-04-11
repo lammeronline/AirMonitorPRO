@@ -26,25 +26,57 @@ static uint32_t _lastWsBroadcast = 0;
 static uint32_t _lastHistorySave = 0;
 static uint32_t _lastHistPush    = 0;
 static uint32_t _startMs         = 0;
+static uint32_t _lastSdUsageRead = 0;
+static uint32_t _lastHealthLog   = 0;
+static uint32_t _lastHistoryMs   = 0;
+static size_t   _lastHistoryPts  = 0;
+static uint32_t _sdUsedMb        = 0;
+static uint32_t _sdTotalMb       = 0;
+static uint8_t  _sdPct           = 0;
 
 static const uint32_t HISTORY_SAVE_INTERVAL = 300000UL; // 5 min
+static const uint32_t SD_USAGE_INTERVAL     = 30000UL;  // 30 s
+static const uint32_t HEALTH_LOG_INTERVAL   = 60000UL;  // 60 s
+static const size_t   HISTORY_HTTP_POINTS   = 360;
 
 // ── /api/history JSON builder (called inside lambda) ──────
 static String _buildHistoryJSON() {
-    size_t n = g_history.size();
-    // Pre-allocate: each point ~30 chars * 4 arrays * 1440 ≈ 175 KB worst case
-    // In practice with 1440 pts we get ~120 KB — fits in ESP32 heap (300 KB free)
+    size_t total = g_history.size();
+    size_t n = total;
+    size_t step = 1;
+    if (n > HISTORY_HTTP_POINTS) {
+        step = (n + HISTORY_HTTP_POINTS - 1) / HISTORY_HTTP_POINTS;
+        n = (n + step - 1) / step;
+    }
+
     String j;
-    j.reserve(n * 32);
+    j.reserve(n * 28 + 64);
     j = "{\"n\":" + String(n) + ",\"temp\":[";
-    for (size_t i=0;i<n;i++){if(i)j+=",";j+=String(g_history.at(i).temp,1);}
+    size_t outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(g_history.at(i).temp, 1);
+    }
     j += "],\"hum\":[";
-    for (size_t i=0;i<n;i++){if(i)j+=",";j+=String(g_history.at(i).hum,1);}
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(g_history.at(i).hum, 1);
+    }
     j += "],\"co2\":[";
-    for (size_t i=0;i<n;i++){if(i)j+=",";j+=String(g_history.at(i).co2);}
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(g_history.at(i).co2);
+    }
     j += "],\"tvoc\":[";
-    for (size_t i=0;i<n;i++){if(i)j+=",";j+=String(g_history.at(i).tvoc);}
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(g_history.at(i).tvoc);
+    }
     j += "]}";
+    _lastHistoryPts = n;
     return j;
 }
 
@@ -72,7 +104,14 @@ void setup() {
 
     // /api/history — serve RAM buffer as JSON
     WebServerModule::registerRoute("/api/history", [](){
+        uint32_t t0 = millis();
+        uint32_t heapBefore = ESP.getFreeHeap();
         String json = _buildHistoryJSON();
+        _lastHistoryMs = millis() - t0;
+        DBGF("[Web] /api/history pts=%u bytes=%u heap=%u->%u took=%ums\n",
+             (unsigned)_lastHistoryPts, (unsigned)json.length(),
+             (unsigned)heapBefore, (unsigned)ESP.getFreeHeap(),
+             (unsigned)_lastHistoryMs);
         // Access server via module's internal send helper
         // WebServerModule exposes sendJSON() for this purpose
         WebServerModule::sendJSON(json);
@@ -86,6 +125,7 @@ void loop() {
     uint32_t now = millis();
 
     WifiManager::loop();
+    WebServerModule::loop();
 
     static bool _tgStarted = false;
     if (WifiManager::isConnected()) {
@@ -99,7 +139,13 @@ void loop() {
     g_data = Sensors::latest();
 
     g_status.sd_ok      = SDLogger::isOK();
-    SDLogger::getUsage(g_status.sd_used_mb, g_status.sd_total_mb, g_status.sd_pct);
+    if (_lastSdUsageRead == 0 || now - _lastSdUsageRead >= SD_USAGE_INTERVAL) {
+        _lastSdUsageRead = now;
+        SDLogger::getUsage(_sdUsedMb, _sdTotalMb, _sdPct);
+    }
+    g_status.sd_used_mb = _sdUsedMb;
+    g_status.sd_total_mb = _sdTotalMb;
+    g_status.sd_pct = _sdPct;
     g_status.rtc_ok     = RTCModule::isOK();
     g_status.ens_ok     = Sensors::ensOK();
     g_status.aht_ok     = Sensors::ahtOK();
@@ -136,6 +182,17 @@ void loop() {
         MQTTModule::publish(g_data, g_status);
     }
 
-    WebServerModule::loop();
+    if (_lastHealthLog == 0 || now - _lastHealthLog >= HEALTH_LOG_INTERVAL) {
+        _lastHealthLog = now;
+        DBGF("[Health] heap=%u minHeap=%u wsClients=%u histPts=%u histMs=%u wifi=%s tg=%s\n",
+             (unsigned)ESP.getFreeHeap(),
+             (unsigned)ESP.getMinFreeHeap(),
+             (unsigned)WebServerModule::connectedClients(),
+             (unsigned)g_history.size(),
+             (unsigned)_lastHistoryMs,
+             WifiManager::isConnected() ? "up" : "down",
+             TelegramModule::isEnabled() ? "on" : "off");
+    }
+
     yield();
 }
