@@ -74,8 +74,7 @@ static void _startBucket(HistoryAccumulator& acc, uint32_t bucketStart, const Se
     acc.tvoc_sum = d.tvoc;
 }
 
-template<size_t N>
-static void _flushBucket(HistoryAccumulator& acc, RingBuffer<HistoryPoint, N>& out) {
+static void _flushBucket24(HistoryAccumulator& acc) {
     if (!acc.active || acc.count == 0) return;
     HistoryPoint p;
     p.ts   = acc.bucket_start;
@@ -83,15 +82,35 @@ static void _flushBucket(HistoryAccumulator& acc, RingBuffer<HistoryPoint, N>& o
     p.hum  = acc.hum_sum / acc.count;
     p.co2  = (uint16_t)(acc.co2_sum / acc.count);
     p.tvoc = (uint16_t)(acc.tvoc_sum / acc.count);
-    out.push(p);
+    g_hist24.push(p);
 }
 
-template<size_t N>
-static bool _updateHistory(HistoryAccumulator& acc,
-                           RingBuffer<HistoryPoint, N>& out,
-                           uint32_t bucketSec,
-                           uint32_t epochSec,
-                           const SensorData& d) {
+static void _flushBucket7(HistoryAccumulator& acc) {
+    if (!acc.active || acc.count == 0) return;
+    HistoryPoint p;
+    p.ts   = acc.bucket_start;
+    p.temp = acc.temp_sum / acc.count;
+    p.hum  = acc.hum_sum / acc.count;
+    p.co2  = (uint16_t)(acc.co2_sum / acc.count);
+    p.tvoc = (uint16_t)(acc.tvoc_sum / acc.count);
+    g_hist7.push(p);
+}
+
+static void _flushBucket30(HistoryAccumulator& acc) {
+    if (!acc.active || acc.count == 0) return;
+    HistoryPoint p;
+    p.ts   = acc.bucket_start;
+    p.temp = acc.temp_sum / acc.count;
+    p.hum  = acc.hum_sum / acc.count;
+    p.co2  = (uint16_t)(acc.co2_sum / acc.count);
+    p.tvoc = (uint16_t)(acc.tvoc_sum / acc.count);
+    g_hist30.push(p);
+}
+
+static bool _updateHistory24(HistoryAccumulator& acc,
+                             uint32_t bucketSec,
+                             uint32_t epochSec,
+                             const SensorData& d) {
     if (bucketSec == 0 || epochSec == 0) return false;
     uint32_t bucketStart = epochSec - (epochSec % bucketSec);
     if (!acc.active) {
@@ -99,7 +118,53 @@ static bool _updateHistory(HistoryAccumulator& acc,
         return false;
     }
     if (acc.bucket_start != bucketStart) {
-        _flushBucket(acc, out);
+        _flushBucket24(acc);
+        _startBucket(acc, bucketStart, d);
+        return true;
+    }
+    acc.count++;
+    acc.temp_sum += d.temp;
+    acc.hum_sum  += d.hum;
+    acc.co2_sum  += d.co2;
+    acc.tvoc_sum += d.tvoc;
+    return false;
+}
+
+static bool _updateHistory7(HistoryAccumulator& acc,
+                            uint32_t bucketSec,
+                            uint32_t epochSec,
+                            const SensorData& d) {
+    if (bucketSec == 0 || epochSec == 0) return false;
+    uint32_t bucketStart = epochSec - (epochSec % bucketSec);
+    if (!acc.active) {
+        _startBucket(acc, bucketStart, d);
+        return false;
+    }
+    if (acc.bucket_start != bucketStart) {
+        _flushBucket7(acc);
+        _startBucket(acc, bucketStart, d);
+        return true;
+    }
+    acc.count++;
+    acc.temp_sum += d.temp;
+    acc.hum_sum  += d.hum;
+    acc.co2_sum  += d.co2;
+    acc.tvoc_sum += d.tvoc;
+    return false;
+}
+
+static bool _updateHistory30(HistoryAccumulator& acc,
+                             uint32_t bucketSec,
+                             uint32_t epochSec,
+                             const SensorData& d) {
+    if (bucketSec == 0 || epochSec == 0) return false;
+    uint32_t bucketStart = epochSec - (epochSec % bucketSec);
+    if (!acc.active) {
+        _startBucket(acc, bucketStart, d);
+        return false;
+    }
+    if (acc.bucket_start != bucketStart) {
+        _flushBucket30(acc);
         _startBucket(acc, bucketStart, d);
         return true;
     }
@@ -122,8 +187,102 @@ static String _formatHistoryLabel(uint32_t ts, const String& range) {
     return String(buf);
 }
 
-template<size_t N>
-static String _buildHistoryJSON(const RingBuffer<HistoryPoint, N>& buf, const String& range) {
+static String _buildHistoryJSON24(const String& range) {
+    const RingBuffer<HistoryPoint, HISTORY_24H_CAP>& buf = g_hist24;
+    size_t total = buf.size();
+    size_t n = total;
+    size_t step = 1;
+    if (n > HISTORY_HTTP_POINTS) {
+        step = (n + HISTORY_HTTP_POINTS - 1) / HISTORY_HTTP_POINTS;
+        n = (n + step - 1) / step;
+    }
+
+    String j;
+    j.reserve(n * 60 + 128);
+    j = "{\"range\":\"" + range + "\",\"n\":" + String(n) + ",\"labels\":[";
+    size_t outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += "\"" + _formatHistoryLabel(buf.at(i).ts, range) + "\"";
+    }
+    j += "],\"temp\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).temp, 1);
+    }
+    j += "],\"hum\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).hum, 1);
+    }
+    j += "],\"co2\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).co2);
+    }
+    j += "],\"tvoc\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).tvoc);
+    }
+    j += "]}";
+    _lastHistoryPts = n;
+    return j;
+}
+
+static String _buildHistoryJSON7(const String& range) {
+    const RingBuffer<HistoryPoint, HISTORY_7D_CAP>& buf = g_hist7;
+    size_t total = buf.size();
+    size_t n = total;
+    size_t step = 1;
+    if (n > HISTORY_HTTP_POINTS) {
+        step = (n + HISTORY_HTTP_POINTS - 1) / HISTORY_HTTP_POINTS;
+        n = (n + step - 1) / step;
+    }
+
+    String j;
+    j.reserve(n * 60 + 128);
+    j = "{\"range\":\"" + range + "\",\"n\":" + String(n) + ",\"labels\":[";
+    size_t outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += "\"" + _formatHistoryLabel(buf.at(i).ts, range) + "\"";
+    }
+    j += "],\"temp\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).temp, 1);
+    }
+    j += "],\"hum\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).hum, 1);
+    }
+    j += "],\"co2\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).co2);
+    }
+    j += "],\"tvoc\":[";
+    outIdx = 0;
+    for (size_t i = 0; i < total; i += step) {
+        if (outIdx++) j += ",";
+        j += String(buf.at(i).tvoc);
+    }
+    j += "]}";
+    _lastHistoryPts = n;
+    return j;
+}
+
+static String _buildHistoryJSON30(const String& range) {
+    const RingBuffer<HistoryPoint, HISTORY_30D_CAP>& buf = g_hist30;
     size_t total = buf.size();
     size_t n = total;
     size_t step = 1;
@@ -170,9 +329,9 @@ static String _buildHistoryJSON(const RingBuffer<HistoryPoint, N>& buf, const St
 }
 
 static String _buildSelectedHistoryJSON(const String& range) {
-    if (range == "7d") return _buildHistoryJSON(g_hist7, "7d");
-    if (range == "30d") return _buildHistoryJSON(g_hist30, "30d");
-    return _buildHistoryJSON(g_hist24, "24h");
+    if (range == "7d") return _buildHistoryJSON7("7d");
+    if (range == "30d") return _buildHistoryJSON30("30d");
+    return _buildHistoryJSON24("24h");
 }
 
 static void _resetHistoryState(const RuntimeSettings::HistoryConfig& cfg) {
@@ -284,9 +443,9 @@ void loop() {
         _activeHistCfg.csv_interval_sec = cfg.csv_interval_sec;
     }
     if (timeValid && Sensors::ensStatus() == 0) {
-        if (_updateHistory(_acc24, g_hist24, cfg.hist24_interval_min * 60UL, g_data.ts, g_data)) _hist24Rev++;
-        if (_updateHistory(_acc7,  g_hist7,  cfg.hist7_interval_min  * 60UL, g_data.ts, g_data)) _hist7Rev++;
-        if (_updateHistory(_acc30, g_hist30, cfg.hist30_interval_min * 60UL, g_data.ts, g_data)) _hist30Rev++;
+        if (_updateHistory24(_acc24, cfg.hist24_interval_min * 60UL, g_data.ts, g_data)) _hist24Rev++;
+        if (_updateHistory7(_acc7,   cfg.hist7_interval_min * 60UL,  g_data.ts, g_data)) _hist7Rev++;
+        if (_updateHistory30(_acc30, cfg.hist30_interval_min * 60UL, g_data.ts, g_data)) _hist30Rev++;
     }
     g_status.hist24_rev = _hist24Rev;
     g_status.hist7_rev  = _hist7Rev;
