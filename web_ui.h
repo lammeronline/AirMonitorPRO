@@ -26,6 +26,9 @@ header{display:flex;justify-content:space-between;align-items:center;
 .hdr-title{font-size:15px;font-weight:600}
 .hdr-badge{background:var(--bg4);border:1px solid var(--line);border-radius:6px;
   padding:4px 10px;font-size:12px;color:var(--sub2);font-family:monospace}
+.hdr-badge.live{color:#86efac;border-color:#14532d;background:#0f1f18}
+.hdr-badge.connecting{color:#fcd34d;border-color:#92400e;background:#1f1720}
+.hdr-badge.offline{color:#cbd5e1;border-color:#475569;background:#172033}
 .icon-btn{background:var(--bg3);border:1px solid var(--line);border-radius:8px;
   width:34px;height:34px;display:flex;align-items:center;justify-content:center;
   cursor:pointer;font-size:15px;color:var(--sub2);transition:border-color .2s}
@@ -64,6 +67,18 @@ main{max-width:1100px;margin:0 auto;padding:16px}
 .aqi-desc{font-size:13px;font-weight:600;margin-bottom:6px}
 .aqi-dots{display:flex;gap:5px}
 .aqi-dots span{flex:1;height:8px;border-radius:4px;background:var(--bg4);transition:background .4s}
+body.offline .card,
+body.offline .chart-card,
+body.offline .status-bar,
+body.offline #warmup-bar{filter:grayscale(1);opacity:.68}
+body.offline .card::before{background:#64748b!important}
+body.offline .card-value,
+body.offline .aqi-num,
+body.offline .aqi-desc,
+body.offline .level-label,
+body.offline .status-dot span,
+body.offline #s-ip,
+body.offline #s-ver{color:#94a3b8!important}
 /* Warmup */
 #warmup-bar{display:none;background:var(--bg2);border:1px solid #92400e;
   border-radius:var(--r);padding:10px 16px;margin-bottom:12px;align-items:center;gap:10px}
@@ -173,6 +188,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <span style="font-size:18px">🌿</span>
     <span class="hdr-title">Air Monitor</span>
     <div class="hdr-badge" id="hdr-time">--:-- --.--.----</div>
+    <div class="hdr-badge connecting" id="hdr-conn">Connecting</div>
   </div>
   <div style="display:flex;gap:8px">
     <div class="icon-btn" onclick="openSettings()">⚙</div>
@@ -257,9 +273,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-temp)"></div>TEMP</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('temp','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('temp','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('temp','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('temp','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('temp','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('temp','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cTemp"></canvas></div>
@@ -268,9 +284,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-hum)"></div>HUM</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('hum','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('hum','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('hum','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('hum','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('hum','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('hum','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cHum"></canvas></div>
@@ -279,9 +295,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-co2)"></div>ECO2</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('co2','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('co2','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('co2','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('co2','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('co2','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('co2','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cCO2"></canvas></div>
@@ -290,9 +306,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div class="chart-header">
       <div class="chart-title"><div class="chart-dot" style="background:var(--c-tvoc)"></div>TVOC</div>
       <div class="chart-controls">
-        <button class="chart-btn active" onclick="setRange('tvoc','A',this)">A</button>
-        <button class="chart-btn" onclick="setRange('tvoc','H',this)">H</button>
-        <button class="chart-btn" onclick="setRange('tvoc','M',this)">M</button>
+        <button class="chart-btn active" onclick="setRange('tvoc','24h',this)">24h</button>
+        <button class="chart-btn" onclick="setRange('tvoc','7d',this)">7d</button>
+        <button class="chart-btn" onclick="setRange('tvoc','30d',this)">30d</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="cTVOC"></canvas></div>
@@ -342,9 +358,15 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
       <button class="btn btn-outline" style="width:100%;margin-bottom:14px" onclick="scanWifi()">🔍 Scan Networks</button>
     </div>
     <div class="form-section">
+      <div class="form-section-title">Device Identity</div>
+      <div class="form-group"><label>Device Name</label><input id="cfg-devname" placeholder="AirMonitor-PRO"></div>
+      <div style="font-size:10px;color:var(--sub);margin-top:-8px;margin-bottom:10px">Used as hostname in the network (e.g. http://AirMonitor-PRO.local)</div>
+      <div class="btn-row"><button class="btn btn-outline btn-full" onclick="saveDeviceName()">💾 Save Device Name</button></div>
+    </div>
+    <div class="form-section">
       <div class="form-section-title">Credentials</div>
       <div class="form-group"><label>SSID</label><input id="cfg-ssid" placeholder="Network name"></div>
-      <div class="form-group"><label>Password</label><input id="cfg-pass" type="password" placeholder="Password"></div>
+      <div class="form-group"><label>Password</label><input id="cfg-pass" type="password" placeholder="Leave blank to keep current"></div>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary btn-full" onclick="saveWifi()">💾 Save & Reconnect</button>
@@ -447,7 +469,7 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
   <div class="tab-pane" id="tab-ota">
     <div class="form-section-title" style="margin-bottom:12px">Firmware Update</div>
     <div id="ota-drop" onclick="document.getElementById('ota-file').click()"
-         ondragover="event.preventDefault();this.classList.add('drag')"
+         ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag')"
          ondragleave="this.classList.remove('drag')"
          ondrop="otaDrop(event)">
       <input type="file" id="ota-file" accept=".bin" onchange="otaSelected(this)">
@@ -459,8 +481,48 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
     <div id="ota-status" style="font-size:12px;color:var(--sub2);text-align:center;margin-top:8px;min-height:18px"></div>
   </div>
 
+  <!-- OTA Confirm Modal -->
+  <div id="ota-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.75);
+       display:none;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+                padding:24px;max-width:340px;width:90%;text-align:center">
+      <div style="font-size:20px;margin-bottom:12px">⚠️ Confirm Update</div>
+      <div style="font-size:12px;color:var(--sub2);margin-bottom:16px;line-height:1.8">
+        <div>Current firmware: <b id="ota-cur-ver" style="color:var(--text)">-</b></div>
+        <div>New file: <b id="ota-new-file" style="color:var(--text)">-</b></div>
+        <div>Size: <b id="ota-new-size" style="color:var(--text)">-</b></div>
+      </div>
+      <p style="font-size:11px;color:var(--warn,#f59e0b);margin-bottom:18px">
+        Device will flash and reboot. Do not power off during update.
+      </p>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-outline" onclick="otaModalClose()">Cancel</button>
+        <button class="btn btn-danger" onclick="otaConfirm()">🚀 Flash Now</button>
+      </div>
+    </div>
+  </div>
+
   <!-- System -->
   <div class="tab-pane" id="tab-sys">
+    <div class="form-section">
+      <div class="form-section-title">Time & NTP</div>
+      <div class="form-group"><label>NTP Server</label><input id="ntp-srv" placeholder="pool.ntp.org"></div>
+      <div class="form-group"><label>Timezone offset, seconds (UTC+3 = 10800)</label><input id="tz-offset" type="number" value="10800" min="-43200" max="50400" step="3600"></div>
+      <div style="font-size:10px;color:var(--sub);margin-top:-8px;margin-bottom:10px">Common: UTC+0=0  UTC+1=3600  UTC+2=7200  UTC+3=10800  UTC+5:30=19800</div>
+      <div class="btn-row"><button class="btn btn-outline btn-full" onclick="saveNTP()">💾 Save NTP Settings</button></div>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">History & Logging</div>
+      <div class="form-row">
+        <div class="form-group"><label>CSV interval, sec</label><input id="csv-int-s" type="number" value="60" min="30" max="3600"></div>
+        <div class="form-group"><label>24h chart, min</label><input id="hist24-min" type="number" value="5" min="5" max="60"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>7d chart, min</label><input id="hist7-min" type="number" value="60" min="30" max="720"></div>
+        <div class="form-group"><label>30d chart, min</label><input id="hist30-min" type="number" value="360" min="60" max="1440"></div>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary btn-full" onclick="saveHistorySettings()">💾 Save History Settings</button></div>
+    </div>
     <div class="form-section">
       <div class="form-section-title">Device Info</div>
       <div style="font-size:12px;color:var(--sub2);line-height:2.2">
@@ -498,9 +560,9 @@ input:checked+.slider:before{transform:translateX(18px);background:#fff}
 
 <script>
 // ═══════════════ Chart setup ═══════════════
-const MAX_PTS = 1440;
-const store = {temp:{A:[],H:[],M:[]},hum:{A:[],H:[],M:[]},co2:{A:[],H:[],M:[]},tvoc:{A:[],H:[],M:[]}};
-const ranges = {temp:'A',hum:'A',co2:'A',tvoc:'A'};
+const historyCache = {'24h':null,'7d':null,'30d':null};
+const historyRev = {'24h':0,'7d':0,'30d':0};
+const ranges = {temp:'24h',hum:'24h',co2:'24h',tvoc:'24h'};
 
 const mkChart = (id,color) => new Chart(document.getElementById(id),{
   type:'line',
@@ -527,23 +589,12 @@ const charts = {
   tvoc:mkChart('cTVOC','rgba(251,146,60,1)'),
 };
 
-function pushPt(key,label,value){
-  const pt={label,value};
-  ['A','H','M'].forEach(r=>{
-    store[key][r].push(pt);
-    if(store[key][r].length>MAX_PTS) store[key][r].shift();
-  });
-  renderChart(key);
-}
-
 function renderChart(key){
   const r=ranges[key];
-  let pts=store[key][r];
-  if(r==='H') pts=pts.slice(-60);
-  if(r==='M') pts=pts.slice(-10);
+  const hist=historyCache[r];
   const c=charts[key];
-  c.data.labels=pts.map(p=>p.label);
-  c.data.datasets[0].data=pts.map(p=>p.value);
+  c.data.labels=hist&&hist.labels?hist.labels:[];
+  c.data.datasets[0].data=hist&&hist[key]?hist[key]:[];
   c.update('none');
 }
 
@@ -551,25 +602,18 @@ function setRange(key,r,btn){
   ranges[key]=r;
   btn.closest('.chart-controls').querySelectorAll('.chart-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  renderChart(key);
+  if(!historyCache[r]) loadHistoryRange(r);
+  else renderChart(key);
 }
 
-// ═══════════════ History preload ═══════════════
-fetch('/api/history').then(r=>r.json()).then(h=>{
-  if(!h||!h.temp) return;
-  const n=h.temp.length;
-  for(let i=0;i<n;i++){
-    const lbl=String(i);
-    ['A','H','M'].forEach(r=>{
-      if(h.temp[i]!==undefined) store.temp[r].push({label:lbl,value:h.temp[i]});
-      if(h.hum[i] !==undefined) store.hum[r].push( {label:lbl,value:h.hum[i]});
-      if(h.co2[i] !==undefined) store.co2[r].push(  {label:lbl,value:h.co2[i]});
-      if(h.tvoc[i]!==undefined) store.tvoc[r].push( {label:lbl,value:h.tvoc[i]});
-    });
-  }
-  Object.keys(charts).forEach(renderChart);
-  console.log('[History] Loaded',n,'points from device');
-}).catch(()=>{});
+function loadHistoryRange(range){
+  return fetch('/api/history?range='+encodeURIComponent(range)).then(r=>r.json()).then(h=>{
+    if(!h||!h.labels) return;
+    historyCache[range]=h;
+    Object.keys(charts).forEach(k=>{if(ranges[k]===range)renderChart(k);});
+    console.log('[History] Loaded',range,h.n,'points');
+  }).catch(()=>{});
+}
 
 // ═══════════════ Level helpers ═══════════════
 function setLevel(id,pct,label){
@@ -601,11 +645,45 @@ const ENS_ST=['Operating ok','Warm-up','Initial Start-up','No valid output'];
 
 // ═══════════════ WebSocket ═══════════════
 let ws,reconnT;
+let lastDataTs=0;
+let isOffline=true;
+const DATA_TIMEOUT_MS=10000;
+const pageStartTs=Date.now();
+function setConnBadge(state){
+  const el=document.getElementById('hdr-conn');
+  if(!el) return;
+  el.className='hdr-badge '+state;
+  el.textContent=state==='live'?'Live':state==='connecting'?'Connecting':'Offline';
+}
+function setOfflineState(next){
+  if(isOffline===next) return;
+  isOffline=next;
+  document.body.classList.toggle('offline',next);
+}
+function markDataAlive(){
+  lastDataTs=Date.now();
+  setOfflineState(false);
+  setConnBadge('live');
+}
+function checkDataTimeout(){
+  const sinceTs=lastDataTs||pageStartTs;
+  if(Date.now()-sinceTs>DATA_TIMEOUT_MS){
+    setOfflineState(true);
+    setConnBadge('offline');
+  }
+}
 function connectWS(){
+  setConnBadge(lastDataTs?'offline':'connecting');
   ws=new WebSocket('ws://'+location.hostname+':81/');
-  ws.onopen=()=>clearTimeout(reconnT);
+  ws.onopen=()=>{clearTimeout(reconnT);setConnBadge(lastDataTs?'offline':'connecting');};
   ws.onmessage=e=>handleMsg(JSON.parse(e.data));
-  ws.onclose=()=>{reconnT=setTimeout(connectWS,3000)};
+  ws.onclose=()=>{
+    if(Date.now()-lastDataTs>DATA_TIMEOUT_MS || !lastDataTs){
+      setOfflineState(true);
+      setConnBadge('offline');
+    }
+    reconnT=setTimeout(connectWS,3000);
+  };
   ws.onerror=()=>ws.close();
 }
 function handleMsg(d){
@@ -614,6 +692,7 @@ function handleMsg(d){
   if(d.type==='scan')     renderNets(d.networks);
 }
 function updateData(d){
+  markDataAlive();
   document.getElementById('hdr-time').textContent=(d.time_short||'--:--')+'  '+(d.date||'');
   document.getElementById('v-temp').textContent=d.temp.toFixed(1);
   document.getElementById('v-hum').textContent=d.hum.toFixed(1);
@@ -634,9 +713,9 @@ function updateData(d){
     document.getElementById('warmup-fill').style.width=(d.warmup_pct||0)+'%';
   } else wb.classList.remove('show');
 
-  const lbl=d.time_short||'';
-  pushPt('temp',lbl,d.temp); pushPt('hum',lbl,d.hum);
-  if(ensSt===0){pushPt('co2',lbl,d.co2);pushPt('tvoc',lbl,d.tvoc);}
+  maybeReloadHistory('24h',d.hist24_rev);
+  maybeReloadHistory('7d',d.hist7_rev);
+  maybeReloadHistory('30d',d.hist30_rev);
 
   setDot('d-aht',d.aht,'s-aht','AHT21');
   const ensLbl='ENS160 ('+ENS_ST[ensSt]+')';
@@ -655,6 +734,7 @@ function updateData(d){
   document.getElementById('s-ip').textContent='IP: '+d.ip;
   document.getElementById('s-ver').textContent='v'+(d.ver||'-');
   document.getElementById('sys-ver').textContent=d.ver||'-';
+  _currentFwVer='v'+(d.ver||'-');
   document.getElementById('sys-ip').textContent=d.ip;
   document.getElementById('sys-uptime').textContent=fmtUp(d.uptime);
 }
@@ -663,6 +743,12 @@ function setDot(did,ok,sid,label){
   document.getElementById(sid).textContent=label+(ok?' OK':' ERR');
 }
 function fmtUp(s){return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';}
+function maybeReloadHistory(range,rev){
+  if(rev===undefined||rev===null) return;
+  if(historyRev[range]===rev) return;
+  historyRev[range]=rev;
+  if(Object.values(ranges).includes(range)) loadHistoryRange(range);
+}
 
 // ═══════════════ Settings ═══════════════
 function openSettings(){
@@ -679,18 +765,27 @@ function tab(name,btn){
 }
 function applySettings(d){
   if(d.ssid)       document.getElementById('cfg-ssid').value=d.ssid;
+  if(d.dev_name)   document.getElementById('cfg-devname').value=d.dev_name;
   if(d.mqtt_host)  document.getElementById('mqtt-host').value=d.mqtt_host;
   if(d.mqtt_port)  document.getElementById('mqtt-port').value=d.mqtt_port;
   if(d.mqtt_user)  document.getElementById('mqtt-user').value=d.mqtt_user;
   if(d.mqtt_topic) document.getElementById('mqtt-topic').value=d.mqtt_topic;
   document.getElementById('mqtt-en').checked=!!d.mqtt_en;
   document.getElementById('tg-en').checked=!!d.tg_en;
+  if(d.tg_token)   document.getElementById('tg-token').value=d.tg_token;
   if(d.tg_chatid)  document.getElementById('tg-chatid').value=d.tg_chatid;
+  // NTP
+  if(d.ntp_srv)      document.getElementById('ntp-srv').value=d.ntp_srv;
+  if(d.tz_offset_s!==undefined) document.getElementById('tz-offset').value=d.tz_offset_s;
   // Thresholds
   if(d.thr_co2)     document.getElementById('thr-co2').value=d.thr_co2;
   if(d.thr_aqi)     document.getElementById('thr-aqi').value=d.thr_aqi;
   if(d.thr_temp_hi) document.getElementById('thr-temp').value=d.thr_temp_hi;
   if(d.thr_hum_hi)  document.getElementById('thr-hum').value=d.thr_hum_hi;
+  if(d.csv_int_s)   document.getElementById('csv-int-s').value=d.csv_int_s;
+  if(d.hist24_min)  document.getElementById('hist24-min').value=d.hist24_min;
+  if(d.hist7_min)   document.getElementById('hist7-min').value=d.hist7_min;
+  if(d.hist30_min)  document.getElementById('hist30-min').value=d.hist30_min;
 }
 function saveWifi(){
   const ssid=document.getElementById('cfg-ssid').value.trim();
@@ -728,6 +823,20 @@ function saveTG(){
       tg_token:document.getElementById('tg-token').value,
       tg_chatid:document.getElementById('tg-chatid').value})
   }).then(()=>alert('Telegram saved'));
+}
+function saveHistorySettings(){
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      csv_int_s:+document.getElementById('csv-int-s').value||60,
+      hist24_min:+document.getElementById('hist24-min').value||5,
+      hist7_min:+document.getElementById('hist7-min').value||60,
+      hist30_min:+document.getElementById('hist30-min').value||360
+    })
+  }).then(()=>{
+    historyCache['24h']=null; historyCache['7d']=null; historyCache['30d']=null;
+    loadHistoryRange('24h'); loadHistoryRange('7d'); loadHistoryRange('30d');
+    alert('History settings saved');
+  });
 }
 function testTG(){fetch('/api/tg_test').then(r=>r.text()).then(t=>alert('Response: '+t));}
 
@@ -774,14 +883,32 @@ function doExport(){
 }
 
 // ═══════════════ OTA ═══════════════
+let _otaFile = null;
+let _currentFwVer = '-';
 function otaDrop(e){
-  e.preventDefault();
+  e.preventDefault(); e.stopPropagation();
   document.getElementById('ota-drop').classList.remove('drag');
-  const f=e.dataTransfer.files[0]; if(f) uploadFirmware(f);
+  const f=e.dataTransfer.files[0]; if(f) otaPrompt(f);
 }
-function otaSelected(inp){if(inp.files[0])uploadFirmware(inp.files[0]);}
-function uploadFirmware(file){
+function otaSelected(inp){if(inp.files[0]) otaPrompt(inp.files[0]);}
+function otaPrompt(file){
   if(!file.name.endsWith('.bin')){alert('Select a .bin file');return;}
+  _otaFile=file;
+  document.getElementById('ota-cur-ver').textContent=_currentFwVer;
+  document.getElementById('ota-new-file').textContent=file.name;
+  document.getElementById('ota-new-size').textContent=(file.size/1024).toFixed(1)+' KB';
+  document.getElementById('ota-modal').style.display='flex';
+}
+function otaModalClose(){
+  document.getElementById('ota-modal').style.display='none';
+  _otaFile=null;
+  document.getElementById('ota-file').value='';
+}
+function otaConfirm(){
+  document.getElementById('ota-modal').style.display='none';
+  if(_otaFile) uploadFirmware(_otaFile);
+}
+function uploadFirmware(file){
   const pw=document.getElementById('ota-pw');
   const pf=document.getElementById('ota-pf');
   const st=document.getElementById('ota-status');
@@ -797,6 +924,30 @@ function uploadFirmware(file){
     else st.textContent='❌ Failed: '+xhr.responseText;
   };
   xhr.open('POST','/do_update');xhr.send(fd);
+}
+// Prevent browser from navigating to dropped files outside the drop zone
+document.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();});
+document.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();});
+
+// ═══════════════ Device Name ═══════════════
+function saveDeviceName(){
+  const name=document.getElementById('cfg-devname').value.trim();
+  if(!name){alert('Enter device name');return;}
+  if(!confirm('Save device name "'+name+'"? Device will apply name on next boot.')) return;
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dev_name:name})}).then(r=>{
+    if(r.ok) alert('Device name saved. Reboot to apply hostname.');
+  });
+}
+
+// ═══════════════ NTP ═══════════════
+function saveNTP(){
+  const srv=document.getElementById('ntp-srv').value.trim()||'pool.ntp.org';
+  const tz=parseInt(document.getElementById('tz-offset').value)||0;
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ntp_srv:srv,tz_offset_s:tz})}).then(r=>{
+    if(r.ok) alert('NTP settings saved. Will sync on next interval.');
+  });
 }
 
 // ═══════════════ System ═══════════════
@@ -819,6 +970,10 @@ function doCalibrate(){
 }
 
 connectWS();
+loadHistoryRange('24h');
+loadHistoryRange('7d');
+loadHistoryRange('30d');
+setInterval(checkDataTimeout,1000);
 </script>
 </body>
 </html>

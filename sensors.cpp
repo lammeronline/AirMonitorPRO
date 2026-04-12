@@ -17,10 +17,20 @@ static uint32_t   _lastRead   = 0;
 static uint32_t   _startMs    = 0;
 static String     _calMsg     = "Not calibrated yet";
 
+static bool _probeI2C(uint8_t addr) {
+    Wire.beginTransmission(addr);
+    return Wire.endTransmission() == 0;
+}
+
 // ── Init ──────────────────────────────────────────────────
 void begin() {
     Wire.begin(I2C_SDA, I2C_SCL);
     _startMs = millis();
+
+    bool ens52 = _probeI2C(0x52);
+    bool ens53 = _probeI2C(0x53);
+    DBGF("[Sensors] I2C probe ENS160: 0x52=%s 0x53=%s\n",
+         ens52 ? "OK" : "--", ens53 ? "OK" : "--");
 
     if (_aht.begin()) {
         _ahtOK = true;
@@ -61,16 +71,26 @@ void loop() {
     // ENS160 — read VALIDITY flags from STATUS register
     if (_ensOK) {
         uint8_t flags = _ens.getFlags();
+        bool dataReady = _ens.checkDataStatus();
         _ensStatus = (flags >> 2) & 0x03;  // bits [3:2] = VALIDITY
 
-        if (_ensStatus == 0 && _ens.checkDataStatus()) {
-            uint16_t co2  = _ens.getECO2();
-            uint16_t tvoc = _ens.getTVOC();
-            uint8_t  aqi  = _ens.getAQI();
+        uint16_t co2  = _ens.getECO2();
+        uint16_t tvoc = _ens.getTVOC();
+        uint8_t  aqi  = _ens.getAQI();
+
+        // SparkFun ENS160 may expose valid data even when our local STATUS
+        // decode is not yet ideal. Prefer "new data available" as the main
+        // gate and keep STATUS only as diagnostic context.
+        if (dataReady || _ensStatus == 0) {
             if (co2  >= 400 && co2  <= 65000) _latest.co2  = co2;
             if (tvoc <= 65000)                 _latest.tvoc = tvoc;
             if (aqi  >= 1   && aqi  <= 5)      _latest.aqi  = aqi;
         }
+
+        DBGF("[Sensors][ENS160] flags=0x%02X dataReady=%d rawCO2=%u rawTVOC=%u rawAQI=%u status=%u\n",
+             flags, dataReady ? 1 : 0, co2, tvoc, aqi, _ensStatus);
+    } else {
+        DBGLN("[Sensors][ENS160] sensor unavailable");
     }
 
     _latest.ts = now;

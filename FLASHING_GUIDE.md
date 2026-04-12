@@ -1,4 +1,4 @@
-# 🔥 Как прошить Air Monitor PRO
+# 🔥 Как подготовить среду и прошить Air Monitor PRO
 
 ---
 
@@ -9,7 +9,10 @@
 | Arduino IDE 2.x | https://www.arduino.cc/en/software |
 | ESP32 board package | Boards Manager в IDE |
 | USB-кабель с данными (не только зарядка!) | — |
-| Драйвер CP2102 или CH340 | Зависит от вашей платы |
+| Windows 10/11 | Основная целевая среда сборки и прошивки |
+| Драйвер CP2102/CP210x или CH340 | Зависит от вашей платы ESP32 |
+
+> Эта инструкция описывает **основной путь для Windows**. Анализировать и редактировать проект можно на Ubuntu, но параметры сборки и шаги загрузки ниже рассчитаны именно на Windows.
 
 ---
 
@@ -37,14 +40,16 @@ https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32
 |---|---|---|
 | Adafruit SSD1306 | `SSD1306` | Adafruit |
 | Adafruit GFX Library | `Adafruit GFX` | Adafruit |
-| Adafruit AHTX0 | `AHTX0` | Adafruit |
-| DFRobot_ENS160 | `ENS160 DFRobot` | DFRobot |
 | RTClib | `RTClib` | Adafruit |
 | WebSockets | `WebSockets` | Markus Sattler |
 | ArduinoJson | `ArduinoJson` | Benoit Blanchon |
 | PubSubClient | `PubSubClient` | Nick O'Leary |
+| SparkFun ENS160 | `SparkFun ENS160` | SparkFun |
+| SparkFun Qwiic Humidity AHT20 | `SparkFun Qwiic Humidity AHT20` | SparkFun |
 
 > **Важно:** При установке Adafruit SSD1306 IDE предложит "Install all dependencies" — нажмите **Yes**.
+>
+> Этот список взят из реального кода проекта. Если ориентироваться только на старую документацию, можно поставить несовместимые библиотеки датчиков.
 
 ---
 
@@ -65,10 +70,12 @@ https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32
 // Ваш часовой пояс (UTC+3 = Украина/Москва)
 #define TZ_OFFSET_SEC 10800
 
-// Пороги алертов (в telegram_module.cpp)
-static const uint16_t ALERT_CO2_PPM = 1500;  // ppm
-static const uint8_t  ALERT_AQI_LVL = 3;     // 1-5
+// При необходимости можно временно включить сброс NVS
+#define FORCE_FACTORY_RESET 0
 ```
+
+Пороговые значения Telegram и MQTT не задаются в `config.h` на постоянной основе:
+они сохраняются в NVS через веб-интерфейс после первого подключения устройства к сети.
 
 ---
 
@@ -87,17 +94,18 @@ static const uint8_t  ALERT_AQI_LVL = 3;     // 1-5
 | **Partition Scheme** | **Default 4MB with spiffs** |
 | **Core Debug Level** | None |
 | **PSRAM** | Disabled |
-| **Port** | COM3 (или /dev/ttyUSB0 на Linux/Mac) |
+| **Port** | COM3 или другой обнаруженный `COMx` |
 
 ---
 
 ## ШАГ 5 — Подключение ESP32
 
 1. Подключите ESP32 к USB
-2. Нажмите кнопку **BOOT** на плате и держите
-3. В Arduino IDE нажмите **Upload** (→)
-4. Когда в консоли появится `Connecting....` — отпустите BOOT
-5. Дождитесь `Hard resetting via RTS pin...` — прошивка завершена!
+2. Убедитесь, что в `Tools → Port` появился нужный `COM`-порт
+3. Нажмите кнопку **BOOT** на плате и держите
+4. В Arduino IDE нажмите **Upload** (→)
+5. Когда в консоли появится `Connecting....` — отпустите BOOT
+6. Дождитесь `Hard resetting via RTS pin...` — прошивка завершена!
 
 > На некоторых платах (ESP32-DevKit v4) BOOT кнопку держать не нужно — всё автоматически.
 
@@ -115,13 +123,15 @@ static const uint8_t  ALERT_AQI_LVL = 3;     // 1-5
 ╚══════════════════════════════╝
 [SD] Card OK
 [Sensors] AHT21 OK
-[Sensors] ENS160 OK (warming up 3 min)
+[Sensors] ENS160 OK
 [OLED] SSD1306 OK
 [RTC] DS3231 OK
 [WiFi] Starting AP: AirMonitor_SETUP
-[Web] HTTP port 80, WS port 81
+[Web] HTTP:80 WS:81
 [Main] Setup complete
 ```
+
+Если некоторых модулей физически нет на плате или они не подключены, сообщения будут указывать на конкретный отказ (`FAIL` / `not found`). Для проверки среды сборки это допустимо: главное, чтобы прошивка загрузилась и устройство стартовало.
 
 ---
 
@@ -220,9 +230,10 @@ reset   → сброс настроек
 
 | Проблема | Решение |
 |---|---|
-| Port не появляется | Установите драйвер CP2102 или CH340 |
+| COM-порт не появляется | Проверьте data-кабель, затем установите драйвер `CP210x` или `CH340` |
 | `Failed to connect to ESP32` | Держите кнопку BOOT при прошивке |
 | Компилятор ругается на библиотеку | Проверьте версию (ArduinoJson нужна ≥6.x) |
+| Не находятся ENS160/AHT20 библиотеки | Убедитесь, что установлены именно `SparkFun ENS160` и `SparkFun Qwiic Humidity AHT20` |
 | OLED не показывает | Проверьте адрес (0x3C или 0x3D), подтяжки SDA/SCL |
 | ENS160 не видит датчик | Проверьте ADDR пин (HIGH = 0x53, LOW = 0x52) |
 | Telegram не работает | Убедитесь что /start написан боту до настройки |

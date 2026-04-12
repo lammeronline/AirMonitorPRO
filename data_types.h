@@ -12,7 +12,15 @@ struct SensorData {
     uint16_t co2    = 400;    // ppm  (eCO2)
     uint16_t tvoc   = 0;      // ppb
     uint8_t  aqi    = 1;      // 1-5
-    uint32_t ts     = 0;      // millis() snapshot
+    uint32_t ts     = 0;      // unix epoch seconds
+};
+
+struct HistoryPoint {
+    uint32_t ts   = 0;        // unix epoch bucket start
+    float    temp = 0.0f;
+    float    hum  = 0.0f;
+    uint16_t co2  = 400;
+    uint16_t tvoc = 0;
 };
 
 // ---------- System status flags -----------------------------
@@ -30,6 +38,9 @@ struct SystemStatus {
     uint32_t sd_used_mb  = 0;
     uint32_t sd_total_mb = 0;
     uint8_t  sd_pct      = 0;    // still warming up
+    uint32_t hist24_rev  = 0;
+    uint32_t hist7_rev   = 0;
+    uint32_t hist30_rev  = 0;
 };
 
 // ---------- Ring buffer for history -------------------------

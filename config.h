@@ -45,7 +45,6 @@
 
 // ---------- Timing (ms) -------------------------------------
 #define SENSOR_READ_INTERVAL   10000UL   // sensor poll
-#define LOG_INTERVAL           60000UL   // SD write
 #define OLED_SWITCH_INTERVAL    5000UL   // page flip
 #define WS_BROADCAST_INTERVAL   2000UL   // WebSocket push
 #define NTP_SYNC_INTERVAL    3600000UL   // NTP re-sync
@@ -55,6 +54,17 @@
 
 // ---------- Data ring buffer ---------------------------------
 #define DATA_BUFFER_SIZE 1440            // 24 h @ 1/min
+
+// ---------- Runtime history/logging defaults -----------------
+#define CSV_LOG_INTERVAL_DEFAULT_SEC      60
+#define HIST_24H_INTERVAL_DEFAULT_MIN      5
+#define HIST_7D_INTERVAL_DEFAULT_MIN      60
+#define HIST_30D_INTERVAL_DEFAULT_MIN    360
+
+// ---------- History buffer capacities ------------------------
+#define HISTORY_24H_CAP 288              // 24h @ 5 min
+#define HISTORY_7D_CAP  336              // 7d  @ 30 min
+#define HISTORY_30D_CAP 720              // 30d @ 1 hour
 
 // ---------- NTP ---------------------------------------------
 #define NTP_SERVER1  "pool.ntp.org"

@@ -1,5 +1,6 @@
 #include "sd_logger.h"
 #include "config.h"
+#include "runtime_settings.h"
 #include <SD.h>
 #include <SPI.h>
 #include <WebServer.h>
@@ -8,22 +9,13 @@ namespace SDLogger {
 
 static bool     _sdOK    = false;
 static uint32_t _lastLog = 0;
+static uint32_t _lastLogBucket = 0;
 
 static const char CACHE_DIR[] = "/cache";
 static const char HIST_FILE[] = "/cache/history.bin";
 
 // ── Magic header so we don't load corrupt files ──────────
 static const uint32_t HIST_MAGIC = 0xA1B2C3D4;
-
-// ── Packed struct saved per history point ────────────────
-struct HistPoint {
-    float    temp;
-    float    hum;
-    uint16_t co2;
-    uint16_t tvoc;
-    uint8_t  aqi;
-    char     time[6];   // "HH:MM\0"
-};
 
 // ─────────────────────────────────────────────────────────
 void begin() {
@@ -39,11 +31,15 @@ void begin() {
 }
 
 // ─────────────────────────────────────────────────────────
-void loop(const SensorData& d, const String& datetime, const String& dateOnly) {
-    if (!_sdOK) return;
-    uint32_t now = millis();
-    if (now - _lastLog < LOG_INTERVAL) return;
-    _lastLog = now;
+void loop(const SensorData& d, const String& datetime, const String& dateOnly,
+          uint32_t epochSec, bool timeValid) {
+    if (!_sdOK || !timeValid || epochSec == 0) return;
+    auto cfg = RuntimeSettings::get();
+    uint32_t step = (uint32_t)cfg.csv_interval_sec;
+    uint32_t bucket = epochSec - (epochSec % step);
+    if (_lastLogBucket == bucket) return;
+    _lastLogBucket = bucket;
+    _lastLog = millis();
 
     String path = String(LOG_DIR) + "/" + dateOnly + ".csv";
     bool newFile = !SD.exists(path);
@@ -71,38 +67,41 @@ void getUsage(uint32_t& used, uint32_t& total, uint8_t& pct) {
 // ─────────────────────────────────────────────────────────
 //  History persistence
 // ─────────────────────────────────────────────────────────
-void saveHistory(const RingBuffer<SensorData, DATA_BUFFER_SIZE>& buf,
-                 const String& dateOnly) {
+void saveHistory(const RingBuffer<HistoryPoint, HISTORY_24H_CAP>& hist24,
+                 const RingBuffer<HistoryPoint, HISTORY_7D_CAP>& hist7,
+                 const RingBuffer<HistoryPoint, HISTORY_30D_CAP>& hist30) {
     if (!_sdOK) return;
-
-    // Remove old file and rewrite (SD doesn't support seek-write cleanly)
     if (SD.exists(HIST_FILE)) SD.remove(HIST_FILE);
     File f = SD.open(HIST_FILE, FILE_WRITE);
     if (!f) { DBGLN("[SD] History save FAIL"); return; }
 
-    // Header: magic + date string + count
     uint32_t magic = HIST_MAGIC;
     f.write((uint8_t*)&magic, 4);
-    uint16_t cnt = (uint16_t)buf.size();
-    f.write((uint8_t*)&cnt, 2);
-
-    // Write each point as packed struct
-    for (size_t i = 0; i < buf.size(); i++) {
-        const SensorData& d = buf.at(i);
-        HistPoint hp;
-        hp.temp = d.temp; hp.hum = d.hum;
-        hp.co2  = d.co2;  hp.tvoc = d.tvoc; hp.aqi = d.aqi;
-        // Convert millis timestamp to HH:MM string via d.ts
-        uint32_t sec = d.ts / 1000;
-        snprintf(hp.time, 6, "%02d:%02d",
-                 (int)((sec / 3600) % 24), (int)((sec / 60) % 60));
-        f.write((uint8_t*)&hp, sizeof(HistPoint));
+    uint16_t c24 = (uint16_t)hist24.size();
+    uint16_t c7  = (uint16_t)hist7.size();
+    uint16_t c30 = (uint16_t)hist30.size();
+    f.write((uint8_t*)&c24, 2);
+    f.write((uint8_t*)&c7, 2);
+    f.write((uint8_t*)&c30, 2);
+    for (size_t i = 0; i < hist24.size(); i++) {
+        HistoryPoint hp = hist24.at(i);
+        f.write((uint8_t*)&hp, sizeof(HistoryPoint));
+    }
+    for (size_t i = 0; i < hist7.size(); i++) {
+        HistoryPoint hp = hist7.at(i);
+        f.write((uint8_t*)&hp, sizeof(HistoryPoint));
+    }
+    for (size_t i = 0; i < hist30.size(); i++) {
+        HistoryPoint hp = hist30.at(i);
+        f.write((uint8_t*)&hp, sizeof(HistoryPoint));
     }
     f.close();
-    DBGF("[SD] History saved: %d points\n", cnt);
+    DBGF("[SD] History saved: 24h=%u 7d=%u 30d=%u\n", c24, c7, c30);
 }
 
-bool loadHistory(RingBuffer<SensorData, DATA_BUFFER_SIZE>& buf) {
+bool loadHistory(RingBuffer<HistoryPoint, HISTORY_24H_CAP>& hist24,
+                 RingBuffer<HistoryPoint, HISTORY_7D_CAP>& hist7,
+                 RingBuffer<HistoryPoint, HISTORY_30D_CAP>& hist30) {
     if (!_sdOK || !SD.exists(HIST_FILE)) return false;
     File f = SD.open(HIST_FILE, FILE_READ);
     if (!f) return false;
@@ -111,19 +110,31 @@ bool loadHistory(RingBuffer<SensorData, DATA_BUFFER_SIZE>& buf) {
     f.read((uint8_t*)&magic, 4);
     if (magic != HIST_MAGIC) { f.close(); DBGLN("[SD] History: bad magic"); return false; }
 
-    uint16_t cnt = 0;
-    f.read((uint8_t*)&cnt, 2);
-    if (cnt > DATA_BUFFER_SIZE) cnt = DATA_BUFFER_SIZE;
+    uint16_t c24 = 0, c7 = 0, c30 = 0;
+    f.read((uint8_t*)&c24, 2);
+    f.read((uint8_t*)&c7, 2);
+    f.read((uint8_t*)&c30, 2);
+    if (c24 > HISTORY_24H_CAP) c24 = HISTORY_24H_CAP;
+    if (c7 > HISTORY_7D_CAP) c7 = HISTORY_7D_CAP;
+    if (c30 > HISTORY_30D_CAP) c30 = HISTORY_30D_CAP;
 
     uint32_t loaded = 0;
-    for (uint16_t i = 0; i < cnt; i++) {
-        HistPoint hp;
-        if (f.read((uint8_t*)&hp, sizeof(HistPoint)) != sizeof(HistPoint)) break;
-        SensorData d;
-        d.temp = hp.temp; d.hum = hp.hum;
-        d.co2  = hp.co2;  d.tvoc = hp.tvoc; d.aqi = hp.aqi;
-        d.ts   = 0;
-        buf.push(d);
+    for (uint16_t i = 0; i < c24; i++) {
+        HistoryPoint hp;
+        if (f.read((uint8_t*)&hp, sizeof(HistoryPoint)) != sizeof(HistoryPoint)) break;
+        hist24.push(hp);
+        loaded++;
+    }
+    for (uint16_t i = 0; i < c7; i++) {
+        HistoryPoint hp;
+        if (f.read((uint8_t*)&hp, sizeof(HistoryPoint)) != sizeof(HistoryPoint)) break;
+        hist7.push(hp);
+        loaded++;
+    }
+    for (uint16_t i = 0; i < c30; i++) {
+        HistoryPoint hp;
+        if (f.read((uint8_t*)&hp, sizeof(HistoryPoint)) != sizeof(HistoryPoint)) break;
+        hist30.push(hp);
         loaded++;
     }
     f.close();

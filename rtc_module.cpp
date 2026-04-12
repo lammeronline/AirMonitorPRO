@@ -3,6 +3,7 @@
 #include <RTClib.h>       // Adafruit RTClib
 #include <WiFi.h>
 #include <time.h>
+#include <Preferences.h>
 
 namespace RTCModule {
 
@@ -27,9 +28,16 @@ void begin() {
 
 void syncFromNTP() {
     if (WiFi.status() != WL_CONNECTED) return;
-    DBGLN("[RTC] Syncing from NTP...");
 
-    configTime(TZ_OFFSET_SEC, 0, NTP_SERVER1, NTP_SERVER2);
+    // Load NTP settings from NVS (allows runtime override via web UI)
+    Preferences p;
+    p.begin("airmon", true);
+    String ntpSrv  = p.getString("ntp_srv",    NTP_SERVER1);
+    int32_t tzOff  = p.getInt   ("tz_offset_s", TZ_OFFSET_SEC);
+    p.end();
+
+    DBGF("[RTC] Syncing NTP from %s (TZ offset %ds)...\n", ntpSrv.c_str(), tzOff);
+    configTime(tzOff, 0, ntpSrv.c_str(), NTP_SERVER2);
 
     struct tm t;
     if (getLocalTime(&t, 5000)) {
@@ -58,6 +66,24 @@ void loop() {
 }
 
 bool isOK() { return _rtcOK || _ntpSynced; }
+
+bool hasValidTime() {
+    if (_rtcOK) {
+        DateTime dt = _rtc.now();
+        return dt.year() >= 2024;
+    }
+    time_t now = time(nullptr);
+    return now > 1704067200;
+}
+
+uint32_t getEpoch() {
+    if (_rtcOK) {
+        DateTime dt = _rtc.now();
+        if (dt.year() >= 2024) return dt.unixtime();
+    }
+    time_t now = time(nullptr);
+    return now > 1704067200 ? (uint32_t)now : 0;
+}
 
 String getTimeString() {
     if (_rtcOK) {

@@ -15,6 +15,7 @@ namespace WifiManager {
     void    loop();                // call every loop()
     Mode    currentMode();
     bool    isConnected();
+    bool    isStableConnected(uint32_t minStableMs = 0);
 
     // Scan & return JSON array string of found networks
     String  scanNetworks();
