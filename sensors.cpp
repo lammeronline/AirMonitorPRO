@@ -1,6 +1,7 @@
 #include "sensors.h"
 #include "config.h"
 #include <Wire.h>
+#include <Preferences.h>
 #include "SparkFun_ENS160.h"
 #include "SparkFun_Qwiic_Humidity_AHT20.h"
 
@@ -16,6 +17,18 @@ static uint8_t    _ensStatus  = 2;       // Initial Start-up
 static uint32_t   _lastRead   = 0;
 static uint32_t   _startMs    = 0;
 static String     _calMsg     = "Not calibrated yet";
+static float      _tempOffset = 0.0f;   // AHT21 correction, °C
+static float      _humOffset  = 0.0f;   // AHT21 correction, %
+
+// Reload offsets from NVS (called from begin() and on settings change)
+static void _loadOffsets() {
+    Preferences p;
+    p.begin("airmon", true);
+    _tempOffset = p.getFloat("aht_temp_off", 0.0f);
+    _humOffset  = p.getFloat("aht_hum_off",  0.0f);
+    p.end();
+    DBGF("[Sensors] AHT21 offsets: T%+.1f°C  RH%+.1f%%\n", _tempOffset, _humOffset);
+}
 
 static bool _probeI2C(uint8_t addr) {
     Wire.beginTransmission(addr);
@@ -48,6 +61,7 @@ void begin() {
         DBGLN("[Sensors] ENS160 FAIL");
         _ensStatus = 3;
     }
+    _loadOffsets();
 }
 
 // ── Non-blocking poll ─────────────────────────────────────
@@ -58,10 +72,11 @@ void loop() {
 
     // AHT21
     if (_ahtOK && _aht.isConnected()) {
-        float t = _aht.getTemperature();
-        float h = _aht.getHumidity();
-        if (t > -40.0f && t < 85.0f)  _latest.temp = t;
-        if (h >   0.0f && h < 100.0f) _latest.hum  = h;
+        float t = _aht.getTemperature() + _tempOffset;
+        float h = _aht.getHumidity()    + _humOffset;
+        // Clamp to physical bounds after applying offset
+        if (t > -40.0f && t < 85.0f)   _latest.temp = t;
+        if (h >   0.0f && h < 100.0f)  _latest.hum  = h;
         if (_ensOK) {
             _ens.setTempCompensation(_latest.temp);
             _ens.setRHCompensation(_latest.hum);
@@ -137,5 +152,6 @@ bool    ensOK()                { return _ensOK; }
 bool    ahtOK()                { return _ahtOK; }
 uint8_t ensStatus()            { return _ensStatus; }
 bool    ensWarmingUp()         { return _ensOK && (_ensStatus != 0); }
+void    reloadOffsets()        { _loadOffsets(); }
 
 } // namespace Sensors

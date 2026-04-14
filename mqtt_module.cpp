@@ -7,36 +7,52 @@
 
 namespace MQTTModule {
 
-// ---- Config loaded from NVS ----------------------------
-static bool    _enabled   = false;
-static String  _host;
-static uint16_t _port     = 1883;
-static String  _user;
-static String  _pass;
-static String  _topic     = "airmonitor";
+// ── Config loaded from NVS ───────────────────────────────
+static bool     _enabled = false;
+static String   _host;
+static uint16_t _port    = 1883;
+static String   _user;
+static String   _pass;
+static String   _topic   = "airmonitor";
 
-// ---- Runtime -------------------------------------------
+// ── Pre-built topic strings (rebuilt on connect) ─────────
+// Avoids String concatenation inside publish() on every call.
+static String _tTmp, _tHum, _tCo2, _tTvoc, _tAqi, _tRssi, _tJson, _tStatus, _tCmd;
+
+static void _rebuildTopics() {
+    _tTmp    = _topic + "/temp";
+    _tHum    = _topic + "/hum";
+    _tCo2    = _topic + "/co2";
+    _tTvoc   = _topic + "/tvoc";
+    _tAqi    = _topic + "/aqi";
+    _tRssi   = _topic + "/rssi";
+    _tJson   = _topic + "/json";
+    _tStatus = _topic + "/status";
+    _tCmd    = _topic + "/cmd";
+}
+
+// ── Runtime ──────────────────────────────────────────────
 static WiFiClient    _wifiClient;
 static PubSubClient  _client(_wifiClient);
-static uint32_t      _lastReconnect  = 0;
-static uint32_t      _lastPublish    = 0;
+static uint32_t      _lastReconnect = 0;
+static uint32_t      _lastPublish   = 0;
 static const uint32_t RECONNECT_INTERVAL = 10000UL;
-static const uint32_t PUBLISH_INTERVAL   = 30000UL;  // publish every 30s
+static const uint32_t PUBLISH_INTERVAL   = 30000UL;
 
-// ---- Forward ----
+// ── Forward ──────────────────────────────────────────────
 static void _connect();
 static void _onMessage(char* topic, byte* payload, unsigned int len);
 
-// -------------------------------------------------------
+// ── Prefs load ───────────────────────────────────────────
 static void _loadPrefs() {
     Preferences p;
     p.begin("airmon", true);
     _enabled = p.getBool("mqtt_en",    false);
-    _host    = p.getString("mqtt_host","");
+    _host    = p.getString("mqtt_host", "");
     _port    = (uint16_t)p.getInt("mqtt_port", 1883);
-    _user    = p.getString("mqtt_user","");
-    _pass    = p.getString("mqtt_pass","");
-    _topic   = p.getString("mqtt_topic","airmonitor");
+    _user    = p.getString("mqtt_user", "");
+    _pass    = p.getString("mqtt_pass", "");
+    _topic   = p.getString("mqtt_topic", "airmonitor");
     p.end();
 }
 
@@ -46,6 +62,7 @@ void begin() {
         DBGLN("[MQTT] Disabled or no host configured");
         return;
     }
+    _rebuildTopics();
     _client.setServer(_host.c_str(), _port);
     _client.setKeepAlive(60);
     _client.setCallback(_onMessage);
@@ -58,39 +75,35 @@ void reload() {
     begin();
 }
 
-// -------------------------------------------------------
+// ── Connect ──────────────────────────────────────────────
 static void _connect() {
     if (!WiFi.isConnected()) return;
 
-    String clientId = "AirMonitor-";
-    clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
+    // Use lower 4 bytes of MAC as unique client suffix
+    char clientId[32];
+    snprintf(clientId, sizeof(clientId), "AirMonitor-%08X",
+             (unsigned)ESP.getEfuseMac());
 
     DBGF("[MQTT] Connecting to %s:%d as %s ...\n",
-         _host.c_str(), _port, clientId.c_str());
+         _host.c_str(), _port, clientId);
 
-    bool ok;
-    if (_user.isEmpty()) {
-        ok = _client.connect(clientId.c_str());
-    } else {
-        ok = _client.connect(clientId.c_str(), _user.c_str(), _pass.c_str());
-    }
+    const bool ok = _user.isEmpty()
+        ? _client.connect(clientId)
+        : _client.connect(clientId, _user.c_str(), _pass.c_str());
 
     if (ok) {
         DBGLN("[MQTT] Connected ✓");
-        // Subscribe to command topic
-        String cmdTopic = _topic + "/cmd";
-        _client.subscribe(cmdTopic.c_str());
-        // Announce online
-        _client.publish((_topic + "/status").c_str(), "online", true);
+        _client.subscribe(_tCmd.c_str());
+        _client.publish(_tStatus.c_str(), "online", true);
     } else {
         DBGF("[MQTT] Failed, rc=%d\n", _client.state());
     }
 }
 
-// -------------------------------------------------------
+// ── Incoming command handler ─────────────────────────────
 static void _onMessage(char* topic, byte* payload, unsigned int len) {
-    String msg;
-    for (unsigned int i = 0; i < len; i++) msg += (char)payload[i];
+    // Construct String from raw bytes — avoids char-by-char appending.
+    const String msg((const char*)payload, len);
     DBGF("[MQTT] ← [%s] %s\n", topic, msg.c_str());
 
     if (msg == "reboot") {
@@ -105,12 +118,12 @@ static void _onMessage(char* topic, byte* payload, unsigned int len) {
     }
 }
 
-// -------------------------------------------------------
+// ── Loop ─────────────────────────────────────────────────
 void loop() {
     if (!_enabled || _host.isEmpty()) return;
 
     if (!_client.connected()) {
-        uint32_t now = millis();
+        const uint32_t now = millis();
         if (now - _lastReconnect >= RECONNECT_INTERVAL) {
             _lastReconnect = now;
             _connect();
@@ -120,23 +133,25 @@ void loop() {
     _client.loop();
 }
 
-// -------------------------------------------------------
+// ── Publish ──────────────────────────────────────────────
 void publish(const SensorData& d, const SystemStatus& s) {
     if (!_enabled || !_client.connected()) return;
-    uint32_t now = millis();
+    const uint32_t now = millis();
     if (now - _lastPublish < PUBLISH_INTERVAL) return;
     _lastPublish = now;
 
-    // Individual topics
-    _client.publish((_topic+"/temp").c_str(),  String(d.temp,  1).c_str());
-    _client.publish((_topic+"/hum").c_str(),   String(d.hum,   1).c_str());
-    _client.publish((_topic+"/co2").c_str(),   String(d.co2).c_str());
-    _client.publish((_topic+"/tvoc").c_str(),  String(d.tvoc).c_str());
-    _client.publish((_topic+"/aqi").c_str(),   String(d.aqi).c_str());
-    _client.publish((_topic+"/rssi").c_str(),  String(s.rssi).c_str());
+    // Numeric fields — use stack char[] to avoid heap String alloc per field.
+    char buf[16];
+
+    snprintf(buf, sizeof(buf), "%.1f",  d.temp); _client.publish(_tTmp.c_str(),  buf);
+    snprintf(buf, sizeof(buf), "%.1f",  d.hum);  _client.publish(_tHum.c_str(),  buf);
+    snprintf(buf, sizeof(buf), "%u",    d.co2);   _client.publish(_tCo2.c_str(),  buf);
+    snprintf(buf, sizeof(buf), "%u",    d.tvoc);  _client.publish(_tTvoc.c_str(), buf);
+    snprintf(buf, sizeof(buf), "%u",    d.aqi);   _client.publish(_tAqi.c_str(),  buf);
+    snprintf(buf, sizeof(buf), "%d",    s.rssi);  _client.publish(_tRssi.c_str(), buf);
 
     // Full JSON payload on <topic>/json
-    DynamicJsonDocument doc(256);
+    StaticJsonDocument<256> doc;
     doc["temp"]   = d.temp;
     doc["hum"]    = d.hum;
     doc["co2"]    = d.co2;
@@ -146,9 +161,9 @@ void publish(const SensorData& d, const SystemStatus& s) {
     doc["uptime"] = s.uptime;
     doc["ip"]     = s.ip;
     doc["time"]   = s.time_str;
-    String json;
-    serializeJson(doc, json);
-    _client.publish((_topic+"/json").c_str(), json.c_str());
+    char json[256];
+    serializeJson(doc, json, sizeof(json));
+    _client.publish(_tJson.c_str(), json);
 
     DBGF("[MQTT] Published → %s/json\n", _topic.c_str());
 }

@@ -6,7 +6,7 @@
 // ============================================================
 
 // ---------- Debug -------------------------------------------
-#define DEBUG_MODE          1
+#define DEBUG_MODE          0  // Set to 1 to enable serial debug output
 #define FORCE_FACTORY_RESET 0
 
 #if DEBUG_MODE
@@ -41,7 +41,6 @@
 // ---------- WiFi AP -----------------------------------------
 #define AP_SSID     "AirMonitor_SETUP"
 #define AP_PASSWORD ""           // open network
-#define AP_IP_STR   "192.168.4.1"
 
 // ---------- Timing (ms) -------------------------------------
 #define SENSOR_READ_INTERVAL   10000UL   // sensor poll
@@ -51,9 +50,6 @@
 
 // ---------- ENS160 warm-up ----------------------------------
 #define ENS160_WARMUP_MS      180000UL   // 3 minutes
-
-// ---------- Data ring buffer ---------------------------------
-#define DATA_BUFFER_SIZE 1440            // 24 h @ 1/min
 
 // ---------- Runtime history/logging defaults -----------------
 #define CSV_LOG_INTERVAL_DEFAULT_SEC      60

@@ -32,12 +32,12 @@ void syncFromNTP() {
     // Load NTP settings from NVS (allows runtime override via web UI)
     Preferences p;
     p.begin("airmon", true);
-    String ntpSrv  = p.getString("ntp_srv",    NTP_SERVER1);
-    int32_t tzOff  = p.getInt   ("tz_offset_s", TZ_OFFSET_SEC);
+    String ntpSrv  = p.getString("ntp_srv",  NTP_SERVER1);
+    int32_t tzHours = p.getInt  ("tz_hours", TZ_OFFSET_SEC / 3600);
     p.end();
 
-    DBGF("[RTC] Syncing NTP from %s (TZ offset %ds)...\n", ntpSrv.c_str(), tzOff);
-    configTime(tzOff, 0, ntpSrv.c_str(), NTP_SERVER2);
+    DBGF("[RTC] Syncing NTP from %s (UTC%+d)...\n", ntpSrv.c_str(), tzHours);
+    configTime(tzHours * 3600L, 0, ntpSrv.c_str(), NTP_SERVER2);
 
     struct tm t;
     if (getLocalTime(&t, 5000)) {

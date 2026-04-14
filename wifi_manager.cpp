@@ -2,6 +2,7 @@
 #include "config.h"
 #include <WiFi.h>
 #include <Preferences.h>
+#include <DNSServer.h>
 
 namespace WifiManager {
 
@@ -13,7 +14,8 @@ static uint8_t     _retries = 0;
 static String      _ssid;
 static String      _pass;
 static String      _hostname;
-static const uint8_t MAX_RETRIES = 5;
+static DNSServer   _dns;
+static const uint8_t  MAX_RETRIES       = 5;
 static const uint32_t RETRY_INTERVAL_MS = 10000UL;
 
 static const char* _statusName(wl_status_t st) {
@@ -38,6 +40,11 @@ static void _startAP() {
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
     _mode = Mode::AP;
     DBGF("[WiFi] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+    // Captive portal: resolve every DNS query to our IP
+    // so browsers automatically open the setup page.
+    _dns.start(53, "*", apIP);
+    DBGLN("[WiFi] Captive portal DNS started");
 }
 
 static void _startSTA(const String& ssid, const String& pass) {
@@ -92,7 +99,10 @@ void begin() {
 }
 
 void loop() {
-    if (_mode != Mode::STA) return;
+    if (_mode == Mode::AP) {
+        _dns.processNextRequest();   // serve captive portal DNS
+        return;
+    }
 
     wl_status_t st = WiFi.status();
     if (st == WL_CONNECTED) {

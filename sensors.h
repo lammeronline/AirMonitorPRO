@@ -21,4 +21,7 @@ namespace Sensors {
     // Call when air is known-clean (window open, outdoors, etc.)
     bool    calibrateBaseline();
     String  calibrateStatusMsg();  // human-readable last calibration result
+
+    // Reload AHT21 offsets from NVS (call after saving settings)
+    void    reloadOffsets();
 }

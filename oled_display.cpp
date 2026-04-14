@@ -2,6 +2,7 @@
 #include "config.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Preferences.h>
 
 namespace OLEDDisplay {
 
@@ -94,6 +95,20 @@ static void _drawPage1(const SensorData& d, const SystemStatus& s) {
 void begin() {
     if (_disp.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
         _initOK = true;
+
+        // Restore enable state from NVS
+        {
+            Preferences p;
+            p.begin("airmon", true);
+            _enabled = p.getBool("oled_en", true);
+            p.end();
+        }
+        if (!_enabled) {
+            _disp.ssd1306_command(SSD1306_DISPLAYOFF);
+            DBGLN("[OLED] SSD1306 OK (display off by setting)");
+            return;
+        }
+
         _disp.clearDisplay();
         _disp.setTextSize(1);
         _disp.setTextColor(SSD1306_WHITE);
