@@ -1,0 +1,1658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Air Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:   #0b0f1a;
+      --bg2:  #111827;
+      --bg3:  #1a2236;
+      --bg4:  #212d42;
+      --line: #1e2d45;
+      --text: #e2e8f0;
+      --sub:  #64748b;
+      --sub2: #94a3b8;
+      --r:    10px;
+      --c-temp: #38bdf8;
+      --c-hum:  #a78bfa;
+      --c-co2:  #4ade80;
+      --c-tvoc: #fb923c;
+      --c-aqi:  #fbbf24;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --bad:  #ef4444;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+      font-size: 14px;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* -- Header -- */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 16px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      gap: 8px;
+    }
+    .hdr-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+    .hdr-title  { font-size: 15px; font-weight: 600; white-space: nowrap; }
+    .hdr-badge  {
+      background: var(--bg4);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--sub2);
+      font-family: monospace;
+      white-space: nowrap;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* hide date on narrow screens, keep time */
+    @media(max-width: 400px) {
+      #hdr-time { display: none; }
+    }
+    .hdr-badge.live       { color: #86efac; border-color: #14532d; background: #0f1f18; }
+    .hdr-badge.connecting { color: #fcd34d; border-color: #92400e; background: #1f1720; }
+    .hdr-badge.offline    { color: #cbd5e1; border-color: #475569; background: #172033; }
+    .icon-btn {
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      font-size: 17px;
+      color: var(--sub2);
+      transition: border-color .2s;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover { border-color: var(--sub2); color: var(--text); }
+
+    /* -- Main -- */
+    main { max-width: 1100px; margin: 0 auto; padding: 14px 14px 24px; }
+
+    /* -- Metric cards -- */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    @media(max-width: 700px) { .metrics { grid-template-columns: 1fr 1fr; } }
+    @media(max-width: 340px) { .metrics { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      padding: 12px 14px;
+      position: relative;
+      overflow: visible;
+      transition: border-color .25s;
+    }
+    .card:hover         { border-color: var(--bg4); }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      border-radius: var(--r) var(--r) 0 0;
+    }
+    .card.temp::before  { background: var(--c-temp); }
+    .card.hum::before   { background: var(--c-hum);  }
+    .card.co2::before   { background: var(--c-co2);  }
+    .card.tvoc::before  { background: var(--c-tvoc); }
+    .card.aqi-card      { grid-column: span 4; }
+    @media(max-width: 700px) { .card.aqi-card { grid-column: span 2; } }
+    @media(max-width: 340px) { .card.aqi-card { grid-column: span 1; } }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+    .card-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--sub);
+    }
+
+    /* -- Tooltip (works on touch via JS .tip-open class) -- */
+    .card-info {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+      color: var(--sub);
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .tooltip {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 24px;
+      z-index: 100;
+      background: var(--bg4);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      min-width: 180px;
+      font-size: 11px;
+      color: var(--sub2);
+      line-height: 2;
+      white-space: nowrap;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    }
+    /* Keep tooltip inside viewport on left edge */
+    .card-info:first-child .tooltip,
+    .tooltip.flip-left { right: auto; left: 0; }
+    .card-info.tip-open .tooltip { display: block; }
+    /* Desktop hover still works */
+    @media(hover: hover) {
+      .card-info:hover .tooltip { display: block; }
+    }
+
+    .card-value {
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+    .card-unit  { font-size: 11px; color: var(--sub); margin-bottom: 6px; }
+    .card.temp .card-value { color: var(--c-temp); }
+    .card.hum  .card-value { color: var(--c-hum);  }
+    .card.co2  .card-value { color: var(--c-co2);  }
+    .card.tvoc .card-value { color: var(--c-tvoc); }
+
+    .level-bar  { height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; margin-top: 4px; }
+    .level-fill { height: 100%; border-radius: 2px; transition: width .5s ease; }
+    .level-label { font-size: 10px; color: var(--sub); margin-top: 4px; }
+
+    .aqi-row  { display: flex; align-items: center; gap: 16px; }
+    .aqi-num  { font-size: 28px; font-weight: 700; color: var(--c-aqi); min-width: 28px; }
+    .aqi-desc { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .aqi-dots { display: flex; gap: 5px; }
+    .aqi-dots span {
+      flex: 1;
+      height: 8px;
+      border-radius: 4px;
+      background: var(--bg4);
+      transition: background .4s;
+    }
+
+    /* Offline dimming */
+    body.offline .card,
+    body.offline .chart-card,
+    body.offline .status-bar,
+    body.offline #warmup-bar { filter: grayscale(1); opacity: .65; }
+    body.offline .card::before { background: #64748b !important; }
+    body.offline .card-value,
+    body.offline .aqi-num,
+    body.offline .aqi-desc,
+    body.offline .level-label,
+    body.offline .status-dot span,
+    body.offline #s-ip,
+    body.offline #s-ver { color: #94a3b8 !important; }
+
+    /* -- Warmup bar -- */
+    #warmup-bar {
+      display: none;
+      background: var(--bg2);
+      border: 1px solid #92400e;
+      border-radius: var(--r);
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      align-items: center;
+      gap: 10px;
+    }
+    #warmup-bar.show { display: flex; }
+    .warmup-progress { flex: 1; height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; }
+    .warmup-fill { height: 100%; background: #f59e0b; border-radius: 2px; transition: width .5s; }
+
+    /* -- Charts -- */
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    @media(max-width: 560px) { .charts { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      padding: 12px 14px;
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .chart-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--sub2);
+    }
+    .chart-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .chart-controls { display: flex; gap: 4px; }
+    .chart-btn {
+      background: var(--bg4);
+      border: 1px solid var(--line);
+      color: var(--sub);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all .15s;
+      touch-action: manipulation;
+    }
+    .chart-btn.active,
+    .chart-btn:hover { background: var(--bg3); border-color: var(--sub2); color: var(--text); }
+    .chart-wrap { position: relative; height: 130px; }
+    .chart-wrap canvas { position: absolute; inset: 0; }
+
+    /* -- Status bar -- */
+    .status-bar {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      padding: 10px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+    }
+    .status-dot { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--sub2); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot.ok   { background: var(--good); }
+    .dot.warn { background: var(--warn); }
+    .dot.err  { background: var(--bad);  }
+    .dot.off  { background: var(--sub);  }
+    .status-divider { width: 1px; height: 14px; background: var(--line); }
+    @media(max-width: 480px) { .status-divider { display: none; } }
+
+    /* -- Settings modal -- */
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      backdrop-filter: blur(6px);
+      z-index: 200;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .overlay.open { display: flex; }
+    @media(min-width: 600px) { .overlay.open { align-items: center; } }
+
+    .modal {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: 16px 16px 0 0;
+      width: 100%;
+      max-width: 520px;
+      max-height: 92vh;
+      overflow-y: auto;
+      padding: 18px 16px;
+      -webkit-overflow-scrolling: touch;
+    }
+    @media(min-width: 600px) { .modal { border-radius: 12px; padding: 20px; } }
+
+    .modal-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .modal-hdr h2 { font-size: 16px; font-weight: 700; }
+    .close-btn {
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      width: 32px; height: 32px;
+      color: var(--sub2);
+      font-size: 18px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Tab nav — horizontal scroll on mobile, no wrapping */
+    .tab-nav {
+      display: flex;
+      gap: 3px;
+      margin-bottom: 16px;
+      background: var(--bg3);
+      border-radius: 8px;
+      padding: 3px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .tab-nav::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      flex: none;
+      background: none;
+      border: none;
+      color: var(--sub);
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+      touch-action: manipulation;
+    }
+    .tab-btn.active { background: var(--bg4); color: var(--text); }
+
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* Form elements */
+    .form-section { margin-bottom: 16px; }
+    .form-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--sub);
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+    }
+    .form-group { margin-bottom: 10px; }
+    .form-group label { display: block; font-size: 11px; color: var(--sub); margin-bottom: 4px; }
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+      /* Prevent iOS zoom on focus */
+      font-size: max(13px, 16px);
+    }
+    @media(min-width: 400px) {
+      .form-group input, .form-group select { font-size: 13px; }
+    }
+    .form-group input:focus,
+    .form-group select:focus { border-color: var(--sub2); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    @media(max-width: 340px) { .form-row { grid-template-columns: 1fr; } }
+
+    /* Toggles */
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      gap: 10px;
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-sub { font-size: 10px; color: var(--sub); margin-top: 2px; }
+    .toggle { position: relative; width: 42px; height: 24px; display: inline-block; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--bg4);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: .25s;
+      border: 1px solid var(--line);
+    }
+    .slider:before {
+      content: '';
+      position: absolute;
+      width: 18px; height: 18px;
+      left: 2px; bottom: 2px;
+      background: var(--sub);
+      border-radius: 50%;
+      transition: .25s;
+    }
+    input:checked + .slider { background: #1d4ed8; border-color: #3b82f6; }
+    input:checked + .slider:before { transform: translateX(18px); background: #fff; }
+
+    /* Buttons */
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .btn {
+      padding: 11px 8px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity .2s;
+      text-align: center;
+      touch-action: manipulation;
+    }
+    .btn:active { opacity: .75; }
+    .btn-primary { background: #1d4ed8; color: #fff; }
+    .btn-outline { background: none; border: 1px solid var(--line); color: var(--text); }
+    .btn-warn    { background: #92400e; color: #fbbf24; }
+    .btn-danger  { background: #7f1d1d; color: #fca5a5; }
+    .btn-green   { background: #14532d; color: #86efac; }
+    .btn-full    { grid-column: span 2; }
+
+    /* OTA */
+    #ota-drop {
+      border: 2px dashed var(--line);
+      border-radius: 10px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s;
+      margin-bottom: 12px;
+    }
+    #ota-drop:hover, #ota-drop.drag { border-color: var(--sub2); }
+    #ota-drop input { display: none; }
+    .progress-wrap { background: var(--bg3); border-radius: 6px; height: 8px; overflow: hidden; display: none; }
+    .progress-fill { height: 100%; background: #1d4ed8; border-radius: 6px; transition: width .2s; }
+
+    /* WiFi scan list */
+    .net-list {
+      max-height: 160px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .net-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: border-color .15s;
+    }
+    .net-item:hover, .net-item:active { border-color: var(--sub2); }
+
+    /* Export date chips */
+    .date-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 14px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .date-chip {
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color .15s;
+      font-family: monospace;
+    }
+    .date-chip:hover, .date-chip:active { border-color: var(--c-co2); color: var(--c-co2); }
+
+    #cal-result {
+      font-size: 12px;
+      color: var(--sub2);
+      margin-top: 8px;
+      padding: 8px;
+      background: var(--bg3);
+      border-radius: 6px;
+      display: none;
+    }
+
+    /* OTA confirm modal */
+    #ota-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 300;
+      background: rgba(0,0,0,.75);
+      align-items: center;
+      justify-content: center;
+    }
+    #ota-modal.open { display: flex; }
+    .ota-inner {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 24px 20px;
+      max-width: 340px;
+      width: 90%;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="hdr-left">
+    <span style="font-size:18px;flex-shrink:0">🌿</span>
+    <span class="hdr-title">Air Monitor</span>
+    <div class="hdr-badge" id="hdr-time">--:-- --.--.----</div>
+    <div class="hdr-badge connecting" id="hdr-conn">Connecting</div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <div class="icon-btn" onclick="openSettings()" title="Settings">⚙</div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ENS160 warm-up progress -->
+  <div id="warmup-bar">
+    <span id="warmup-text" style="font-size:11px;color:#fbbf24;white-space:nowrap">⏳ ENS160: Starting</span>
+    <div class="warmup-progress">
+      <div class="warmup-fill" id="warmup-fill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Metric cards -->
+  <div class="metrics">
+
+    <div class="card temp">
+      <div class="card-header">
+        <div class="card-label">Temp</div>
+        <div class="card-info" onclick="toggleTip(this)">?
+          <div class="tooltip">
+            <b>Температура воздуха (AHT21)</b><br>
+            &lt; 18 °C — холодно<br>
+            18 – 22 °C — комфорт<br>
+            22 – 26 °C — тепло<br>
+            &gt; 26 °C — жарко
+          </div>
+        </div>
+      </div>
+      <div class="card-value" id="v-temp">--.-</div>
+      <div class="card-unit">°C</div>
+      <div class="level-bar"><div class="level-fill" id="lv-temp" style="width:0%;background:var(--c-temp)"></div></div>
+      <div class="level-label" id="ll-temp">—</div>
+    </div>
+
+    <div class="card hum">
+      <div class="card-header">
+        <div class="card-label">Humidity</div>
+        <div class="card-info" onclick="toggleTip(this)">?
+          <div class="tooltip">
+            <b>Относительная влажность (AHT21)</b><br>
+            &lt; 30 % — сухо<br>
+            30 – 60 % — норма<br>
+            60 – 70 % — повышенная<br>
+            &gt; 70 % — высокая
+          </div>
+        </div>
+      </div>
+      <div class="card-value" id="v-hum">--.-</div>
+      <div class="card-unit">% RH</div>
+      <div class="level-bar"><div class="level-fill" id="lv-hum" style="width:0%;background:var(--c-hum)"></div></div>
+      <div class="level-label" id="ll-hum">—</div>
+    </div>
+
+    <div class="card co2">
+      <div class="card-header">
+        <div class="card-label">eCO₂</div>
+        <div class="card-info" onclick="toggleTip(this)">?
+          <div class="tooltip">
+            <b>CO₂ эквивалент (ENS160)</b><br>
+            Рассчитывается по TVOC, не прямое измерение.<br>
+            400 – 600 ppm — отлично<br>
+            600 – 1000 ppm — хорошо<br>
+            1000 – 1500 ppm — умеренно<br>
+            1500 – 2000 ppm — плохо<br>
+            &gt; 2000 ppm — опасно
+          </div>
+        </div>
+      </div>
+      <div class="card-value" id="v-co2">---</div>
+      <div class="card-unit">ppm</div>
+      <div class="level-bar"><div class="level-fill" id="lv-co2" style="width:0%;background:var(--c-co2)"></div></div>
+      <div class="level-label" id="ll-co2">—</div>
+    </div>
+
+    <div class="card tvoc">
+      <div class="card-header">
+        <div class="card-label">TVOC</div>
+        <div class="card-info" onclick="toggleTip(this)">?
+          <div class="tooltip">
+            <b>Летучие орг. соединения (ENS160)</b><br>
+            Пары растворителей, краски, чистящие ср-ва.<br>
+            0 – 150 ppb — отлично<br>
+            150 – 500 ppb — хорошо<br>
+            500 – 1500 ppb — умеренно<br>
+            1500 – 5000 ppb — плохо<br>
+            &gt; 5000 ppb — опасно
+          </div>
+        </div>
+      </div>
+      <div class="card-value" id="v-tvoc">---</div>
+      <div class="card-unit">ppb</div>
+      <div class="level-bar"><div class="level-fill" id="lv-tvoc" style="width:0%;background:var(--c-tvoc)"></div></div>
+      <div class="level-label" id="ll-tvoc">—</div>
+    </div>
+
+    <div class="card aqi-card">
+      <div class="card-header">
+        <div class="card-label">Air Quality Index</div>
+        <div class="card-info" onclick="toggleTip(this)">?
+          <div class="tooltip">
+            <b>Индекс качества воздуха (ENS160)</b><br>
+            Комплексная оценка качества воздуха по TVOC.<br>
+            1 — Excellent (отличный)<br>
+            2 — Good (хороший)<br>
+            3 — Moderate (умеренный)<br>
+            4 — Poor (плохой)<br>
+            5 — Unhealthy (опасный)
+          </div>
+        </div>
+      </div>
+      <div class="aqi-row">
+        <div class="aqi-num" id="v-aqi">-</div>
+        <div style="flex:1">
+          <div class="aqi-desc" id="aqi-desc">—</div>
+          <div class="aqi-dots">
+            <span id="aq1"></span><span id="aq2"></span>
+            <span id="aq3"></span><span id="aq4"></span><span id="aq5"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .metrics -->
+
+  <!-- Charts -->
+  <div class="charts">
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title"><div class="chart-dot" style="background:var(--c-temp)"></div>TEMP</div>
+        <div class="chart-controls">
+          <button class="chart-btn active" onclick="setRange('temp','24h',this)">24h</button>
+          <button class="chart-btn" onclick="setRange('temp','7d',this)">7d</button>
+          <button class="chart-btn" onclick="setRange('temp','30d',this)">30d</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="cTemp"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title"><div class="chart-dot" style="background:var(--c-hum)"></div>HUM</div>
+        <div class="chart-controls">
+          <button class="chart-btn active" onclick="setRange('hum','24h',this)">24h</button>
+          <button class="chart-btn" onclick="setRange('hum','7d',this)">7d</button>
+          <button class="chart-btn" onclick="setRange('hum','30d',this)">30d</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="cHum"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title"><div class="chart-dot" style="background:var(--c-co2)"></div>ECO2</div>
+        <div class="chart-controls">
+          <button class="chart-btn active" onclick="setRange('co2','24h',this)">24h</button>
+          <button class="chart-btn" onclick="setRange('co2','7d',this)">7d</button>
+          <button class="chart-btn" onclick="setRange('co2','30d',this)">30d</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="cCO2"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title"><div class="chart-dot" style="background:var(--c-tvoc)"></div>TVOC</div>
+        <div class="chart-controls">
+          <button class="chart-btn active" onclick="setRange('tvoc','24h',this)">24h</button>
+          <button class="chart-btn" onclick="setRange('tvoc','7d',this)">7d</button>
+          <button class="chart-btn" onclick="setRange('tvoc','30d',this)">30d</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="cTVOC"></canvas></div>
+    </div>
+  </div><!-- .charts -->
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-dot"><div class="dot off" id="d-aht"></div><span id="s-aht">AHT21</span></div>
+    <div class="status-divider"></div>
+    <div class="status-dot"><div class="dot off" id="d-ens"></div><span id="s-ens">ENS160</span></div>
+    <div class="status-divider"></div>
+    <div class="status-dot"><div class="dot off" id="d-rtc"></div><span id="s-rtc">DS3231</span></div>
+    <div class="status-divider"></div>
+    <div class="status-dot"><div class="dot off" id="d-sd"></div><span id="s-sd">SD Card</span></div>
+    <div class="status-divider"></div>
+    <div class="status-dot"><div class="dot off" id="d-mqtt"></div><span id="s-mqtt">MQTT</span></div>
+    <div class="status-divider"></div>
+    <div class="status-dot"><span id="s-ip" style="color:var(--sub)">IP: ---</span></div>
+    <div class="status-divider"></div>
+    <div class="status-dot"><span id="s-ver" style="color:var(--sub)">v-</span></div>
+  </div>
+
+</main>
+
+<!-- Settings overlay -->
+<div class="overlay" id="overlay" onclick="bgClose(event)">
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>Settings</h2>
+      <button class="close-btn" onclick="closeSettings()">✕</button>
+    </div>
+
+    <!-- Tab nav -->
+    <div class="tab-nav">
+      <button class="tab-btn active" onclick="tab('wifi',this)">WiFi</button>
+      <button class="tab-btn" onclick="tab('mqtt',this)">MQTT</button>
+      <button class="tab-btn" onclick="tab('tg',this)">Telegram</button>
+      <button class="tab-btn" onclick="tab('thr',this)">Alerts</button>
+      <button class="tab-btn" onclick="tab('export',this)">Export</button>
+      <button class="tab-btn" onclick="tab('ota',this)">OTA</button>
+      <button class="tab-btn" onclick="tab('sys',this)">System</button>
+    </div>
+
+    <!-- WiFi tab -->
+    <div class="tab-pane active" id="tab-wifi">
+      <div class="form-section">
+        <div class="form-section-title">Available Networks</div>
+        <div class="net-list" id="net-list">
+          <div style="color:var(--sub);font-size:12px;padding:8px">Tap Scan to search...</div>
+        </div>
+        <button class="btn btn-outline" style="width:100%;margin-bottom:14px" onclick="scanWifi()">🔍 Scan Networks</button>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Device Identity</div>
+        <div class="form-group">
+          <label>Device Name</label>
+          <input id="cfg-devname" placeholder="AirMonitor-PRO">
+        </div>
+        <div style="font-size:10px;color:var(--sub);margin-top:-6px;margin-bottom:10px">
+          Used as mDNS hostname: http://AirMonitor-PRO.local
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-outline btn-full" onclick="saveDeviceName()">💾 Save Device Name</button>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Credentials</div>
+        <div class="form-group">
+          <label>SSID</label>
+          <input id="cfg-ssid" placeholder="Network name" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input id="cfg-pass" type="password" placeholder="Leave blank to keep current" autocomplete="new-password">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-full" onclick="saveWifi()">💾 Save &amp; Reconnect</button>
+      </div>
+    </div>
+
+    <!-- MQTT tab -->
+    <div class="tab-pane" id="tab-mqtt">
+      <div class="toggle-row" style="margin-bottom:14px">
+        <div>
+          <div>Enable MQTT</div>
+          <div class="toggle-sub">Publishes data every 30 s</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="mqtt-en"><span class="slider"></span></label>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Host / IP</label><input id="mqtt-host" placeholder="192.168.1.100"></div>
+        <div class="form-group"><label>Port</label><input id="mqtt-port" value="1883" type="number"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Username</label><input id="mqtt-user" autocomplete="off"></div>
+        <div class="form-group"><label>Password</label><input id="mqtt-pass" type="password" autocomplete="new-password"></div>
+      </div>
+      <div class="form-group">
+        <label>Topic prefix</label>
+        <input id="mqtt-topic" placeholder="airmonitor">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-full" onclick="saveMQTT()">💾 Save</button>
+      </div>
+    </div>
+
+    <!-- Telegram tab -->
+    <div class="tab-pane" id="tab-tg">
+      <div class="toggle-row" style="margin-bottom:14px">
+        <div>
+          <div>Enable Telegram</div>
+          <div class="toggle-sub">Alerts + bot commands (/status, /help)</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="tg-en"><span class="slider"></span></label>
+      </div>
+      <div class="form-group">
+        <label>Bot Token</label>
+        <input id="tg-token" placeholder="123456:AAF..." autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Chat ID</label>
+        <input id="tg-chatid" placeholder="-100123456" autocomplete="off">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="testTG()">📤 Test</button>
+        <button class="btn btn-primary" onclick="saveTG()">💾 Save</button>
+      </div>
+    </div>
+
+    <!-- Alerts tab -->
+    <div class="tab-pane" id="tab-thr">
+      <div class="form-section">
+        <div class="form-section-title">Alert Thresholds</div>
+        <p style="font-size:11px;color:var(--sub);margin-bottom:12px;line-height:1.7">
+          Telegram alert fires when a value exceeds its threshold.<br>
+          Each alert has a 5-minute cooldown before repeating.
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>CO₂ (ppm)</label>
+            <input id="thr-co2" type="number" value="1500" min="400" max="5000">
+          </div>
+          <div class="form-group">
+            <label>TVOC (ppb)</label>
+            <input id="thr-tvoc" type="number" value="500" min="0" max="65000">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>AQI level (1–5)</label>
+            <input id="thr-aqi" type="number" value="3" min="1" max="5">
+          </div>
+          <div class="form-group">
+            <label>Temperature (°C)</label>
+            <input id="thr-temp" type="number" value="30" min="-10" max="60" step="0.5">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Humidity (%)</label>
+            <input id="thr-hum" type="number" value="75" min="10" max="100">
+          </div>
+          <div class="form-group">
+            <label>Alert cooldown (min)</label>
+            <input id="thr-cooldown" type="number" value="5" min="1" max="120"
+                   title="Minimum minutes between repeated alerts for the same sensor">
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.7">
+          Cooldown — минимальный интервал между повторными алертами по каждому датчику.
+        </p>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-full" onclick="saveThresholds()">💾 Save Thresholds</button>
+      </div>
+      <div id="thr-status" style="font-size:11px;color:var(--good);text-align:center;margin-top:8px;display:none">✅ Saved!</div>
+    </div>
+
+    <!-- Export tab -->
+    <div class="tab-pane" id="tab-export">
+      <div class="form-section">
+        <div class="form-section-title">Export CSV from SD Card</div>
+        <p style="font-size:11px;color:var(--sub);margin-bottom:12px;line-height:1.7">
+          Select a date to download the daily log file from SD.
+        </p>
+        <button class="btn btn-outline" style="width:100%;margin-bottom:12px" onclick="loadExportDates()">🔄 Load Available Dates</button>
+        <div class="date-list" id="date-list">
+          <div style="color:var(--sub);font-size:12px">Tap Load to fetch dates from SD...</div>
+        </div>
+        <div class="form-group">
+          <label>Or enter date manually (YYYY-MM-DD)</label>
+          <input id="export-date" placeholder="2026-04-15" style="font-family:monospace">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green btn-full" onclick="doExport()">⬇ Download CSV</button>
+      </div>
+      <div id="export-status" style="font-size:11px;color:var(--sub2);text-align:center;margin-top:8px"></div>
+    </div>
+
+    <!-- OTA tab -->
+    <div class="tab-pane" id="tab-ota">
+      <div class="form-section-title" style="margin-bottom:12px">Firmware Update (OTA)</div>
+      <p style="font-size:11px;color:var(--sub);margin-bottom:14px;line-height:1.7">
+        Arduino IDE → Sketch → Export Compiled Binary → upload the .bin file.
+      </p>
+      <div id="ota-drop"
+           onclick="document.getElementById('ota-file').click()"
+           ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="otaDrop(event)">
+        <input type="file" id="ota-file" accept=".bin" onchange="otaSelected(this)">
+        <div style="font-size:28px;margin-bottom:8px">📦</div>
+        <div style="font-size:13px;color:var(--sub2)">Drop .bin here or tap to browse</div>
+        <div style="font-size:11px;color:var(--sub);margin-top:4px">Accepts .bin files only</div>
+      </div>
+      <div class="progress-wrap" id="ota-pw">
+        <div class="progress-fill" id="ota-pf" style="width:0%"></div>
+      </div>
+      <div id="ota-status" style="font-size:12px;color:var(--sub2);text-align:center;margin-top:8px;min-height:18px"></div>
+    </div>
+
+    <!-- System tab -->
+    <div class="tab-pane" id="tab-sys">
+      <div class="form-section">
+        <div class="form-section-title">Time &amp; NTP</div>
+        <div class="form-group">
+          <label>NTP Server</label>
+          <input id="ntp-srv" placeholder="pool.ntp.org">
+        </div>
+        <div class="form-group">
+          <label>Timezone (UTC offset)</label>
+          <select id="tz-hours">
+            <option value="-12">UTC-12</option>
+            <option value="-11">UTC-11</option>
+            <option value="-10">UTC-10 (Hawaii)</option>
+            <option value="-9">UTC-9 (Alaska)</option>
+            <option value="-8">UTC-8 (PST)</option>
+            <option value="-7">UTC-7 (MST / PDT)</option>
+            <option value="-6">UTC-6 (CST / MDT)</option>
+            <option value="-5">UTC-5 (EST / CDT)</option>
+            <option value="-4">UTC-4 (EDT / Atlantic)</option>
+            <option value="-3">UTC-3 (BRT / Argentina)</option>
+            <option value="-2">UTC-2</option>
+            <option value="-1">UTC-1 (Azores)</option>
+            <option value="0">UTC+0 (GMT / London)</option>
+            <option value="1">UTC+1 (CET / Paris / Berlin)</option>
+            <option value="2">UTC+2 (EET / Cairo / Kyiv)</option>
+            <option value="3" selected>UTC+3 (MSK / Istanbul)</option>
+            <option value="4">UTC+4 (Gulf / Baku)</option>
+            <option value="5">UTC+5 (PKT)</option>
+            <option value="6">UTC+6 (BST Bangladesh)</option>
+            <option value="7">UTC+7 (ICT / Bangkok)</option>
+            <option value="8">UTC+8 (CST China / Singapore)</option>
+            <option value="9">UTC+9 (JST / Seoul)</option>
+            <option value="10">UTC+10 (AEST / Sydney)</option>
+            <option value="11">UTC+11</option>
+            <option value="12">UTC+12 (NZST)</option>
+            <option value="13">UTC+13</option>
+            <option value="14">UTC+14</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-outline btn-full" onclick="saveNTP()">💾 Save NTP Settings</button>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">History &amp; Logging</div>
+        <div class="form-row">
+          <div class="form-group"><label>CSV interval (sec)</label><input id="csv-int-s" type="number" value="60" min="30" max="3600"></div>
+          <div class="form-group"><label>24h chart (min)</label><input id="hist24-min" type="number" value="5" min="5" max="60"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>7d chart (min)</label><input id="hist7-min" type="number" value="60" min="30" max="720"></div>
+          <div class="form-group"><label>30d chart (min)</label><input id="hist30-min" type="number" value="360" min="60" max="1440"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-full" onclick="saveHistorySettings()">💾 Save History Settings</button>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Device Info</div>
+        <div style="font-size:12px;color:var(--sub2);line-height:2.4">
+          Firmware: <span id="sys-ver" style="color:var(--text)">-</span><br>
+          IP: <span id="sys-ip" style="color:var(--text)">-</span><br>
+          Uptime: <span id="sys-uptime" style="color:var(--text)">-</span>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">AHT21 Sensor Offset</div>
+        <p style="font-size:11px;color:var(--sub);margin-bottom:10px;line-height:1.7">
+          Correction applied to every reading. Use to compensate for
+          enclosure heating or calibration drift.
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Temp offset (°C)</label><input id="aht-temp-off" type="number" value="0" min="-10" max="10" step="0.1"></div>
+          <div class="form-group"><label>Humidity offset (%)</label><input id="aht-hum-off" type="number" value="0" min="-20" max="20" step="0.5"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-outline btn-full" onclick="saveSensorOffsets()">💾 Save Offsets</button>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">ENS160 Calibration</div>
+        <p style="font-size:11px;color:var(--sub);margin-bottom:10px;line-height:1.7">
+          Resets internal baseline. Run when the air is known-clean
+          (window open, or outdoors). Sensor re-warms for ~3 min.
+        </p>
+        <button class="btn btn-outline" style="width:100%" onclick="doCalibrate()">🧪 Calibrate Baseline Now</button>
+        <div id="cal-result"></div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Options</div>
+        <div class="toggle-row">
+          <div>
+            <div>OLED Display</div>
+            <div class="toggle-sub">Turn off to save power</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="oled-en" onchange="setOLED(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div>Debug Mode</div>
+            <div class="toggle-sub">Verbose output on Serial (115200 baud)</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="dbg-en" onchange="setDebug(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn btn-warn" onclick="doReboot()">🔄 Reboot</button>
+        <button class="btn btn-danger" onclick="doReset()">⚠️ Factory Reset</button>
+      </div>
+    </div><!-- tab-sys -->
+
+  </div><!-- .modal -->
+</div><!-- .overlay -->
+
+<!-- OTA confirm dialog -->
+<div id="ota-modal">
+  <div class="ota-inner">
+    <div style="font-size:22px;margin-bottom:12px">⚠️ Confirm Update</div>
+    <div style="font-size:12px;color:var(--sub2);margin-bottom:16px;line-height:2">
+      Current firmware: <b id="ota-cur-ver" style="color:var(--text)">-</b><br>
+      New file: <b id="ota-new-file" style="color:var(--text)">-</b><br>
+      Size: <b id="ota-new-size" style="color:var(--text)">-</b>
+    </div>
+    <p style="font-size:11px;color:var(--warn);margin-bottom:18px">
+      Device will flash and reboot.<br>Do not cut power during the update.
+    </p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button class="btn btn-outline" onclick="otaModalClose()">Cancel</button>
+      <button class="btn btn-danger" onclick="otaConfirm()">🚀 Flash Now</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// -- Tooltip toggle (works on desktop hover + mobile tap) --
+function toggleTip(el) {
+  const isOpen = el.classList.contains('tip-open');
+  document.querySelectorAll('.card-info.tip-open').forEach(e => e.classList.remove('tip-open'));
+  if (!isOpen) el.classList.add('tip-open');
+}
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.card-info')) {
+    document.querySelectorAll('.card-info.tip-open').forEach(e => e.classList.remove('tip-open'));
+  }
+});
+
+// -- Charts --
+const historyCache = { '24h': null, '7d': null, '30d': null };
+const historyRev   = { '24h': 0,    '7d': 0,    '30d': 0    };
+const ranges       = { temp: '24h', hum: '24h', co2: '24h', tvoc: '24h' };
+
+const mkChart = (id, color) => new Chart(document.getElementById(id), {
+  type: 'line',
+  data: { labels: [], datasets: [{ data: [], borderColor: color,
+    backgroundColor: color + '22', borderWidth: 1.5,
+    pointRadius: 0, fill: true, tension: .35 }] },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#1a2236', borderColor: '#1e2d45', borderWidth: 1,
+        titleColor: '#94a3b8', bodyColor: '#e2e8f0', displayColors: false, padding: 8
+      }
+    },
+    scales: {
+      x: { display: true, ticks: { color: '#475569', font: { size: 9 }, maxTicksLimit: 5, maxRotation: 0 }, grid: { color: '#1e2d45' }, border: { color: '#1e2d45' } },
+      y: { ticks: { color: '#475569', font: { size: 9 }, maxTicksLimit: 5 }, grid: { color: '#1e2d45' }, border: { color: '#1e2d45' } }
+    }
+  }
+});
+
+const charts = {
+  temp: mkChart('cTemp', 'rgba(56,189,248,1)'),
+  hum:  mkChart('cHum',  'rgba(167,139,250,1)'),
+  co2:  mkChart('cCO2',  'rgba(74,222,128,1)'),
+  tvoc: mkChart('cTVOC', 'rgba(251,146,60,1)'),
+};
+
+function renderChart(key) {
+  const r = ranges[key], hist = historyCache[r], c = charts[key];
+  c.data.labels = hist && hist.labels ? hist.labels : [];
+  c.data.datasets[0].data = hist && hist[key] ? hist[key] : [];
+  c.update('none');
+}
+
+function setRange(key, r, btn) {
+  ranges[key] = r;
+  btn.closest('.chart-controls').querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (!historyCache[r]) loadHistoryRange(r); else renderChart(key);
+}
+
+function loadHistoryRange(range) {
+  return fetch('/api/history?range=' + encodeURIComponent(range))
+    .then(r => r.json())
+    .then(h => {
+      if (!h || !h.labels) return;
+      historyCache[range] = h;
+      Object.keys(charts).forEach(k => { if (ranges[k] === range) renderChart(k); });
+    }).catch(() => {});
+}
+
+// -- Level bars --------------------------------------------------─
+function setLevel(id, pct, label) {
+  document.getElementById('lv-' + id).style.width = Math.min(100, pct) + '%';
+  document.getElementById('ll-' + id).textContent = label;
+}
+
+const AQI_INFO = [
+  { desc: 'Excellent', color: '#22c55e' },
+  { desc: 'Good',      color: '#84cc16' },
+  { desc: 'Moderate',  color: '#f59e0b' },
+  { desc: 'Poor',      color: '#ef4444' },
+  { desc: 'Unhealthy', color: '#7c3aed' }
+];
+
+function updateAQI(aqi) {
+  document.getElementById('v-aqi').textContent = aqi;
+  const info = AQI_INFO[Math.max(0, Math.min(4, aqi - 1))];
+  const d = document.getElementById('aqi-desc');
+  d.textContent = info.desc; d.style.color = info.color;
+  for (let i = 1; i <= 5; i++)
+    document.getElementById('aq' + i).style.background = i <= aqi ? info.color : 'var(--bg4)';
+}
+
+const tempLv = t =>
+  t < 10 ? { p: t / 10 * 20,             l: '❄ Very Cold' } :
+  t < 18 ? { p: 20 + (t-10)/8*20,        l: '🥶 Cold'      } :
+  t < 22 ? { p: 40 + (t-18)/4*20,        l: '✅ Comfortable'} :
+  t < 26 ? { p: 60 + (t-22)/4*20,        l: '🌤 Warm'      } :
+           { p: 80,                        l: '🔥 Hot'       };
+
+const humLv  = h =>
+  h < 30 ? { p: h/30*30,                 l: '💨 Dry'      } :
+  h < 60 ? { p: 30 + (h-30)/30*40,       l: '✅ Normal'   } :
+  h < 70 ? { p: 70,                       l: '💧 Elevated' } :
+           { p: 85,                        l: '🌊 High'     };
+
+const co2Lv  = c =>
+  c < 600  ? { p: c/600*20,              l: '✅ Excellent' } :
+  c < 1000 ? { p: 20+(c-600)/400*30,     l: '🟢 Good'     } :
+  c < 1500 ? { p: 50+(c-1000)/500*25,    l: '🟡 Moderate' } :
+  c < 2000 ? { p: 75,                    l: '🔴 Poor'      } :
+             { p: 90,                    l: '☠ Dangerous'  };
+
+const tvocLv = v =>
+  v < 150  ? { p: v/150*20,              l: '✅ Excellent' } :
+  v < 500  ? { p: 20+(v-150)/350*30,     l: '🟢 Good'     } :
+  v < 1500 ? { p: 50+(v-500)/1000*25,    l: '🟡 Moderate' } :
+  v < 5000 ? { p: 75,                    l: '🔴 Poor'      } :
+             { p: 95,                    l: '☠ Dangerous'  };
+
+const ENS_ST = ['Operating ok', 'Warm-up', 'Initial Start-up', 'No valid output'];
+
+// -- WebSocket / data --------------------------------------------─
+let ws, reconnT;
+let lastDataTs = 0;
+let isOffline  = true;
+const DATA_TIMEOUT_MS = 10000;
+const pageStartTs     = Date.now();
+
+function setConnBadge(state) {
+  const el = document.getElementById('hdr-conn');
+  el.className = 'hdr-badge ' + state;
+  el.textContent = state === 'live' ? 'Live' : state === 'connecting' ? 'Connecting' : 'Offline';
+}
+
+function setOfflineState(next) {
+  if (isOffline === next) return;
+  isOffline = next;
+  document.body.classList.toggle('offline', next);
+}
+
+function markDataAlive() { lastDataTs = Date.now(); setOfflineState(false); setConnBadge('live'); }
+
+function checkDataTimeout() {
+  const since = lastDataTs || pageStartTs;
+  if (Date.now() - since > DATA_TIMEOUT_MS) { setOfflineState(true); setConnBadge('offline'); }
+}
+
+function connectWS() {
+  setConnBadge(lastDataTs ? 'offline' : 'connecting');
+  ws = new WebSocket('ws://' + location.hostname + ':81/');
+  ws.onopen  = () => { clearTimeout(reconnT); };
+  ws.onmessage = e => handleMsg(JSON.parse(e.data));
+  ws.onclose = () => {
+    if (Date.now() - lastDataTs > DATA_TIMEOUT_MS || !lastDataTs) { setOfflineState(true); setConnBadge('offline'); }
+    reconnT = setTimeout(connectWS, 3000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function handleMsg(d) {
+  if (d.type === 'data')     updateData(d);
+  if (d.type === 'settings') applySettings(d);
+  if (d.type === 'scan')     renderNets(d.networks);
+}
+
+function updateData(d) {
+  markDataAlive();
+  document.getElementById('hdr-time').textContent = (d.time_short || '--:--') + ' ' + (d.date || '');
+  document.getElementById('v-temp').textContent = d.temp.toFixed(1);
+  document.getElementById('v-hum').textContent  = d.hum.toFixed(1);
+  document.getElementById('v-co2').textContent  = d.co2;
+  document.getElementById('v-tvoc').textContent = d.tvoc;
+  updateAQI(d.aqi);
+
+  const tl = tempLv(d.temp); setLevel('temp', tl.p, tl.l);
+  const hl = humLv(d.hum);   setLevel('hum',  hl.p, hl.l);
+  const cl = co2Lv(d.co2);   setLevel('co2',  cl.p, cl.l);
+  const vl = tvocLv(d.tvoc); setLevel('tvoc', vl.p, vl.l);
+
+  const ensSt = d.ens_status !== undefined ? d.ens_status : (d.warmup ? 1 : 0);
+  const wb = document.getElementById('warmup-bar');
+  if (ensSt !== 0) {
+    wb.classList.add('show');
+    document.getElementById('warmup-text').textContent = '⏳ ENS160: ' + (ENS_ST[ensSt] || '...');
+    document.getElementById('warmup-fill').style.width = (d.warmup_pct || 0) + '%';
+  } else {
+    wb.classList.remove('show');
+  }
+
+  maybeReloadHistory('24h', d.hist24_rev);
+  maybeReloadHistory('7d',  d.hist7_rev);
+  maybeReloadHistory('30d', d.hist30_rev);
+
+  setDot('d-aht', d.aht, 's-aht', 'AHT21');
+  const ensLabel = 'ENS160 (' + ENS_ST[ensSt] + ')';
+  document.getElementById('d-ens').className = 'dot ' + (ensSt === 0 ? 'ok' : ensSt === 3 ? 'err' : 'warn');
+  document.getElementById('s-ens').textContent = ensLabel;
+  setDot('d-rtc', d.rtc, 's-rtc', 'DS3231');
+
+  if (d.sd) {
+    document.getElementById('d-sd').className = 'dot ok';
+    document.getElementById('s-sd').textContent = 'SD (' + d.sd_used + '/' + d.sd_total + ' MB, ' + d.sd_pct + '%)';
+  } else {
+    document.getElementById('d-sd').className = 'dot err';
+    document.getElementById('s-sd').textContent = 'SD Card (ERR)';
+  }
+
+  setDot('d-mqtt', d.mqtt, 's-mqtt', 'MQTT');
+  document.getElementById('s-ip').textContent  = 'IP: ' + d.ip;
+  document.getElementById('s-ver').textContent = 'v' + (d.ver || '-');
+
+  // System tab
+  document.getElementById('sys-ver').textContent    = d.ver || '-';
+  document.getElementById('sys-ip').textContent     = d.ip;
+  document.getElementById('sys-uptime').textContent = fmtUp(d.uptime);
+  _currentFwVer = 'v' + (d.ver || '-');
+}
+
+function setDot(did, ok, sid, label) {
+  document.getElementById(did).className = 'dot ' + (ok ? 'ok' : 'err');
+  document.getElementById(sid).textContent = label + (ok ? ' OK' : ' ERR');
+}
+
+function fmtUp(s) { return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; }
+
+function maybeReloadHistory(range, rev) {
+  if (rev === undefined || rev === null) return;
+  if (historyRev[range] === rev) return;
+  historyRev[range] = rev;
+  if (Object.values(ranges).includes(range)) loadHistoryRange(range);
+}
+
+// -- Settings modal ----------------------------------------------─
+function openSettings() {
+  document.getElementById('overlay').classList.add('open');
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ cmd: 'get_settings' }));
+}
+
+function closeSettings() { document.getElementById('overlay').classList.remove('open'); }
+
+function bgClose(e) { if (e.target === document.getElementById('overlay')) closeSettings(); }
+
+function tab(name, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+function applySettings(d) {
+  if (d.ssid)        document.getElementById('cfg-ssid').value    = d.ssid;
+  if (d.dev_name)    document.getElementById('cfg-devname').value = d.dev_name;
+  if (d.mqtt_host)   document.getElementById('mqtt-host').value   = d.mqtt_host;
+  if (d.mqtt_port)   document.getElementById('mqtt-port').value   = d.mqtt_port;
+  if (d.mqtt_user)   document.getElementById('mqtt-user').value   = d.mqtt_user;
+  if (d.mqtt_topic)  document.getElementById('mqtt-topic').value  = d.mqtt_topic;
+  document.getElementById('mqtt-en').checked = !!d.mqtt_en;
+  document.getElementById('tg-en').checked   = !!d.tg_en;
+  if (d.tg_token)    document.getElementById('tg-token').value    = d.tg_token;
+  if (d.tg_chatid)   document.getElementById('tg-chatid').value   = d.tg_chatid;
+  if (d.ntp_srv)     document.getElementById('ntp-srv').value     = d.ntp_srv;
+  if (d.tz_hours !== undefined) document.getElementById('tz-hours').value = d.tz_hours;
+  if (d.aht_temp_off !== undefined) document.getElementById('aht-temp-off').value = d.aht_temp_off;
+  if (d.aht_hum_off  !== undefined) document.getElementById('aht-hum-off').value  = d.aht_hum_off;
+  if (d.thr_co2)     document.getElementById('thr-co2').value  = d.thr_co2;
+  if (d.thr_tvoc !== undefined) document.getElementById('thr-tvoc').value = d.thr_tvoc;
+  if (d.thr_aqi)     document.getElementById('thr-aqi').value  = d.thr_aqi;
+  if (d.thr_temp_hi) document.getElementById('thr-temp').value = d.thr_temp_hi;
+  if (d.thr_hum_hi)  document.getElementById('thr-hum').value  = d.thr_hum_hi;
+  if (d.thr_cooldown !== undefined) document.getElementById('thr-cooldown').value = d.thr_cooldown;
+  if (d.csv_int_s)   document.getElementById('csv-int-s').value  = d.csv_int_s;
+  if (d.hist24_min)  document.getElementById('hist24-min').value = d.hist24_min;
+  if (d.hist7_min)   document.getElementById('hist7-min').value  = d.hist7_min;
+  if (d.hist30_min)  document.getElementById('hist30-min').value = d.hist30_min;
+  if (d.oled_en  !== undefined) document.getElementById('oled-en').checked = !!d.oled_en;
+  if (d.debug_en !== undefined) document.getElementById('dbg-en').checked  = !!d.debug_en;
+}
+
+// -- WiFi --------------------------------------------------------─
+function saveWifi() {
+  const ssid = document.getElementById('cfg-ssid').value.trim();
+  const pass = document.getElementById('cfg-pass').value;
+  if (!ssid) { alert('Enter SSID'); return; }
+  if (!confirm('Save WiFi? Device will reboot.')) return;
+  fetch('/api/wifi', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ssid, pass }) })
+  .then(() => alert('Saved — rebooting...'));
+}
+
+function scanWifi() {
+  document.getElementById('net-list').innerHTML =
+    '<div style="color:var(--sub);font-size:12px;padding:8px">Scanning...</div>';
+  fetch('/api/scan').then(r => r.json()).then(renderNets);
+}
+
+function renderNets(nets) {
+  const el = document.getElementById('net-list');
+  if (!nets || !nets.length) {
+    el.innerHTML = '<div style="color:var(--sub);font-size:12px;padding:8px">No networks found</div>';
+    return;
+  }
+  el.innerHTML = nets.sort((a, b) => b.rssi - a.rssi).map(n =>
+    `<div class="net-item" onclick="document.getElementById('cfg-ssid').value='${n.ssid}'">
+       <span>${n.ssid}</span>
+       <span style="color:var(--sub);font-size:11px">${n.rssi} dBm${n.enc ? ' 🔒' : ''}</span>
+     </div>`
+  ).join('');
+}
+
+// -- MQTT --------------------------------------------------------─
+function saveMQTT() {
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mqtt_en:    document.getElementById('mqtt-en').checked,
+      mqtt_host:  document.getElementById('mqtt-host').value,
+      mqtt_port:  +document.getElementById('mqtt-port').value || 1883,
+      mqtt_user:  document.getElementById('mqtt-user').value,
+      mqtt_pass:  document.getElementById('mqtt-pass').value,
+      mqtt_topic: document.getElementById('mqtt-topic').value
+    }) }).then(() => alert('MQTT saved'));
+}
+
+// -- Telegram ----------------------------------------------------─
+function saveTG() {
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tg_en:     document.getElementById('tg-en').checked,
+      tg_token:  document.getElementById('tg-token').value,
+      tg_chatid: document.getElementById('tg-chatid').value
+    }) }).then(() => alert('Telegram saved'));
+}
+
+function testTG() {
+  fetch('/api/tg_test').then(r => r.text()).then(t => alert('Response: ' + t));
+}
+
+// -- Thresholds --------------------------------------------------─
+function saveThresholds() {
+  const body = {
+    co2:      +document.getElementById('thr-co2').value      || 1500,
+    tvoc:     +document.getElementById('thr-tvoc').value     || 500,
+    aqi:      +document.getElementById('thr-aqi').value      || 3,
+    temp:     +document.getElementById('thr-temp').value     || 30,
+    hum:      +document.getElementById('thr-hum').value      || 75,
+    cooldown: +document.getElementById('thr-cooldown').value || 5,
+  };
+  fetch('/api/thresholds', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) })
+  .then(r => {
+    if (r.ok) {
+      const st = document.getElementById('thr-status');
+      st.style.display = 'block';
+      setTimeout(() => st.style.display = 'none', 2000);
+    }
+  });
+}
+
+// -- History settings --------------------------------------------─
+function saveHistorySettings() {
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      csv_int_s:  +document.getElementById('csv-int-s').value  || 60,
+      hist24_min: +document.getElementById('hist24-min').value || 5,
+      hist7_min:  +document.getElementById('hist7-min').value  || 60,
+      hist30_min: +document.getElementById('hist30-min').value || 360
+    }) })
+  .then(() => {
+    historyCache['24h'] = null; historyCache['7d'] = null; historyCache['30d'] = null;
+    loadHistoryRange('24h'); loadHistoryRange('7d'); loadHistoryRange('30d');
+    alert('History settings saved');
+  });
+}
+
+// -- Export ------------------------------------------------------─
+function loadExportDates() {
+  fetch('/api/export').then(r => r.json()).then(dates => {
+    const el = document.getElementById('date-list');
+    if (!dates || !dates.length) {
+      el.innerHTML = '<div style="color:var(--sub);font-size:12px">No log files on SD card</div>';
+      return;
+    }
+    el.innerHTML = dates.sort().reverse().map(d =>
+      `<div class="date-chip" onclick="document.getElementById('export-date').value='${d}'">${d}</div>`
+    ).join('');
+  });
+}
+
+function doExport() {
+  const date = document.getElementById('export-date').value.trim();
+  if (!date) { alert('Select or enter a date'); return; }
+  document.getElementById('export-status').textContent = 'Downloading...';
+  const a = document.createElement('a');
+  a.href = '/api/export?date=' + encodeURIComponent(date);
+  a.download = 'airmonitor_' + date + '.csv';
+  a.click();
+  setTimeout(() => document.getElementById('export-status').textContent = '', 2000);
+}
+
+// -- OTA ----------------------------------------------------------
+let _otaFile = null, _currentFwVer = '-';
+
+document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('drop',     e => { e.preventDefault(); e.stopPropagation(); });
+
+function otaDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('ota-drop').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) otaPrompt(f);
+}
+
+function otaSelected(inp) { if (inp.files[0]) otaPrompt(inp.files[0]); }
+
+function otaPrompt(file) {
+  if (!file.name.endsWith('.bin')) { alert('Select a .bin file'); return; }
+  _otaFile = file;
+  document.getElementById('ota-cur-ver').textContent  = _currentFwVer;
+  document.getElementById('ota-new-file').textContent = file.name;
+  document.getElementById('ota-new-size').textContent = (file.size / 1024).toFixed(1) + ' KB';
+  document.getElementById('ota-modal').classList.add('open');
+}
+
+function otaModalClose() {
+  document.getElementById('ota-modal').classList.remove('open');
+  _otaFile = null;
+  document.getElementById('ota-file').value = '';
+}
+
+function otaConfirm() {
+  document.getElementById('ota-modal').classList.remove('open');
+  if (_otaFile) uploadFirmware(_otaFile);
+}
+
+function uploadFirmware(file) {
+  const pw = document.getElementById('ota-pw');
+  const pf = document.getElementById('ota-pf');
+  const st = document.getElementById('ota-status');
+  pw.style.display = 'block';
+  pf.style.width = '0%';
+  st.textContent = 'Uploading ' + file.name + '...';
+  const fd = new FormData();
+  fd.append('firmware', file);
+  const xhr = new XMLHttpRequest();
+  xhr.upload.onprogress = ev => {
+    if (ev.lengthComputable) {
+      const p = Math.round(ev.loaded / ev.total * 100);
+      pf.style.width = p + '%';
+      st.textContent = 'Uploading... ' + p + '%';
+    }
+  };
+  xhr.onload = () => {
+    if (xhr.status === 200) { pf.style.background = '#22c55e'; st.textContent = '✅ Done — rebooting...'; }
+    else st.textContent = '❌ Failed: ' + xhr.responseText;
+  };
+  xhr.open('POST', '/do_update');
+  xhr.send(fd);
+}
+
+// -- System ------------------------------------------------------─
+function saveDeviceName() {
+  const name = document.getElementById('cfg-devname').value.trim();
+  if (!name) { alert('Enter device name'); return; }
+  if (!confirm('Save device name "' + name + '"?')) return;
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dev_name: name }) })
+  .then(r => { if (r.ok) alert('Device name saved. Reboot to apply hostname.'); });
+}
+
+function saveNTP() {
+  const srv = document.getElementById('ntp-srv').value.trim() || 'pool.ntp.org';
+  const tz  = parseInt(document.getElementById('tz-hours').value) || 0;
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ntp_srv: srv, tz_hours: tz }) })
+  .then(r => { if (r.ok) alert('NTP settings saved.'); });
+}
+
+function saveSensorOffsets() {
+  const tOff = parseFloat(document.getElementById('aht-temp-off').value) || 0;
+  const hOff = parseFloat(document.getElementById('aht-hum-off').value)  || 0;
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ aht_temp_off: tOff, aht_hum_off: hOff }) })
+  .then(r => { if (r.ok) alert('Sensor offsets saved.'); });
+}
+
+function doCalibrate() {
+  const el = document.getElementById('cal-result');
+  el.style.display = 'block'; el.textContent = '⏳ Calibrating...'; el.style.color = 'var(--sub2)';
+  fetch('/api/calibrate', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => { el.textContent = (d.ok ? '✅ ' : '❌ ') + d.msg; el.style.color = d.ok ? 'var(--good)' : 'var(--bad)'; })
+    .catch(() => { el.textContent = '❌ Error contacting device'; el.style.color = 'var(--bad)'; });
+}
+
+function doReboot() { if (confirm('Reboot?')) fetch('/api/reboot', { method: 'POST' }); }
+
+function doReset() {
+  if (confirm('⚠️ Factory reset? All settings will be erased!'))
+    fetch('/api/reset', { method: 'POST' }).then(() => alert('Reset — rebooting...'));
+}
+
+function setOLED(on) {
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oled_en: on }) });
+}
+
+function setDebug(on) {
+  fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ debug_en: on }) });
+}
+
+// -- Init --------------------------------------------------------─
+connectWS();
+loadHistoryRange('24h');
+loadHistoryRange('7d');
+loadHistoryRange('30d');
+setInterval(checkDataTimeout, 1000);
+</script>
+</body>
+</html>

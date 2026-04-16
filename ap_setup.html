@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>AirMonitor Setup</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:   #0b0f1a;
+      --bg2:  #111827;
+      --bg3:  #1a2236;
+      --line: #1e2d45;
+      --text: #e2e8f0;
+      --sub:  #64748b;
+      --sub2: #94a3b8;
+      --r:    10px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 380px;
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .logo-icon { font-size: 40px; display: block; margin-bottom: 8px; }
+    .logo h1   { font-size: 18px; font-weight: 700; }
+    .logo p    { font-size: 12px; color: var(--sub2); margin-top: 4px; }
+    .net-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+      max-height: 200px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .net-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: border-color .15s;
+    }
+    .net-item:hover, .net-item:active { border-color: var(--sub2); }
+    .net-rssi { font-size: 11px; color: var(--sub); }
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--sub2);
+      margin-bottom: 4px;
+      margin-top: 12px;
+    }
+    input {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 11px 12px;
+      border-radius: 8px;
+      font-size: 16px; /* prevents iOS zoom */
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: var(--sub2); }
+    .btn {
+      width: 100%;
+      margin-top: 16px;
+      padding: 13px;
+      background: #1d4ed8;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .2s;
+      touch-action: manipulation;
+    }
+    .btn:active { opacity: .75; }
+    .btn.scan {
+      background: var(--bg3);
+      border: 1px solid var(--line);
+      color: var(--text);
+      margin-top: 0;
+      margin-bottom: 12px;
+    }
+    .status {
+      font-size: 12px;
+      text-align: center;
+      margin-top: 12px;
+      min-height: 18px;
+      color: var(--sub2);
+    }
+    .status.ok  { color: #22c55e; }
+    .status.err { color: #ef4444; }
+    .divider {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 20px 0;
+    }
+    .hint {
+      font-size: 11px;
+      color: var(--sub);
+      text-align: center;
+      line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+
+  <div class="logo">
+    <span class="logo-icon">🌿</span>
+    <h1>Air Monitor PRO</h1>
+    <p>WiFi Setup</p>
+  </div>
+
+  <!-- Network scan -->
+  <button class="btn scan" onclick="scan()">🔍 Scan Networks</button>
+  <div class="net-list" id="nets">
+    <div style="color:var(--sub);font-size:12px;padding:4px">Tap Scan to search for networks...</div>
+  </div>
+
+  <!-- Credentials -->
+  <label>Network Name (SSID)</label>
+  <input id="ssid" type="text" placeholder="Your WiFi network" autocomplete="off" autocapitalize="none" spellcheck="false">
+
+  <label>Password</label>
+  <input id="pass" type="password" placeholder="Leave blank if open" autocomplete="new-password">
+
+  <button class="btn" onclick="save()">💾 Connect &amp; Save</button>
+  <div class="status" id="status"></div>
+
+  <hr class="divider">
+  <div class="hint">
+    After saving, the device will reboot<br>
+    and connect to your network.<br>
+    Access the dashboard at its new IP.
+  </div>
+
+</div>
+<script>
+function scan() {
+  const el = document.getElementById('nets');
+  el.innerHTML = '<div style="color:var(--sub);font-size:12px;padding:4px">Scanning...</div>';
+  fetch('/api/scan')
+    .then(r => r.json())
+    .then(nets => {
+      if (!nets || !nets.length) {
+        el.innerHTML = '<div style="color:var(--sub);font-size:12px;padding:4px">No networks found. Try again.</div>';
+        return;
+      }
+      el.innerHTML = nets
+        .sort((a, b) => b.rssi - a.rssi)
+        .map(n =>
+          `<div class="net-item" onclick="document.getElementById('ssid').value='${n.ssid.replace(/'/g,"\\'")}';document.getElementById('pass').focus()">
+             <span>${n.ssid}</span>
+             <span class="net-rssi">${n.rssi} dBm${n.enc ? ' 🔒' : ''}</span>
+           </div>`
+        ).join('');
+    })
+    .catch(() => {
+      el.innerHTML = '<div style="color:#ef4444;font-size:12px;padding:4px">Scan failed</div>';
+    });
+}
+
+function save() {
+  const ssid = document.getElementById('ssid').value.trim();
+  const pass = document.getElementById('pass').value;
+  const st   = document.getElementById('status');
+  if (!ssid) { st.className = 'status err'; st.textContent = 'Enter network name'; return; }
+  st.className = 'status'; st.textContent = 'Connecting…';
+  fetch('/api/wifi', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ssid, pass })
+  })
+  .then(r => {
+    if (r.ok) {
+      st.className = 'status ok';
+      st.textContent = '✅ Saved — rebooting device…';
+    } else {
+      st.className = 'status err'; st.textContent = 'Error saving credentials';
+    }
+  })
+  .catch(() => { st.className = 'status err'; st.textContent = 'Request failed'; });
+}
+</script>
+</body>
+</html>

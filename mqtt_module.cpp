@@ -10,7 +10,7 @@ namespace MQTTModule {
 // ── Config loaded from NVS ───────────────────────────────
 static bool     _enabled = false;
 static String   _host;
-static uint16_t _port    = 1883;
+static uint16_t _port    = MQTT_DEFAULT_PORT;
 static String   _user;
 static String   _pass;
 static String   _topic   = "airmonitor";
@@ -49,7 +49,7 @@ static void _loadPrefs() {
     p.begin("airmon", true);
     _enabled = p.getBool("mqtt_en",    false);
     _host    = p.getString("mqtt_host", "");
-    _port    = (uint16_t)p.getInt("mqtt_port", 1883);
+    _port    = (uint16_t)p.getInt("mqtt_port", MQTT_DEFAULT_PORT);
     _user    = p.getString("mqtt_user", "");
     _pass    = p.getString("mqtt_pass", "");
     _topic   = p.getString("mqtt_topic", "airmonitor");

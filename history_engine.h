@@ -102,24 +102,39 @@ String histBuildJSON(const RingBuffer<HistoryPoint, N>& buf,
     j += "\",\"n\":";    j += n;
     j += ",\"labels\":[";
 
-    bool first;
-    auto each = [&](auto fn) {
-        first = true;
-        for (size_t i = 0; i < total; i += step) {
-            if (!first) j += ','; first = false;
-            fn(buf.at(i));
-        }
-    };
-
-    each([&](const HistoryPoint& p){ j += '"'; j += histFmtLabel(p.ts, range); j += '"'; });
+    // Build labels
+    for (size_t i = 0; i < total; i += step) {
+        if (i > 0) j += ',';
+        j += '"'; j += histFmtLabel(buf.at(i).ts, range); j += '"';
+    }
     j += "],\"temp\":[";
-    each([&](const HistoryPoint& p){ j += String(p.temp, 1); });
+
+    // Build temp
+    for (size_t i = 0; i < total; i += step) {
+        if (i > 0) j += ',';
+        j += String(buf.at(i).temp, 1);
+    }
     j += "],\"hum\":[";
-    each([&](const HistoryPoint& p){ j += String(p.hum,  1); });
+
+    // Build humidity
+    for (size_t i = 0; i < total; i += step) {
+        if (i > 0) j += ',';
+        j += String(buf.at(i).hum, 1);
+    }
     j += "],\"co2\":[";
-    each([&](const HistoryPoint& p){ j += String(p.co2); });
+
+    // Build CO2
+    for (size_t i = 0; i < total; i += step) {
+        if (i > 0) j += ',';
+        j += String(buf.at(i).co2);
+    }
     j += "],\"tvoc\":[";
-    each([&](const HistoryPoint& p){ j += String(p.tvoc); });
+
+    // Build TVOC
+    for (size_t i = 0; i < total; i += step) {
+        if (i > 0) j += ',';
+        j += String(buf.at(i).tvoc);
+    }
     j += "]}";
 
     lastPts = n;

@@ -15,7 +15,12 @@
 #include "mqtt_module.h"
 #include "telegram_module.h"
 #include "runtime_settings.h"
+#include <Preferences.h>
+#include <ArduinoJson.h>
 #include <time.h>
+
+// ── Runtime debug flag (web UI → System → Debug Mode) ────
+bool g_debug_enabled = false;
 
 // ── Global state ──────────────────────────────────────────
 static SensorData   g_data;
@@ -73,8 +78,17 @@ static void _resetHistoryState(const RuntimeSettings::HistoryConfig& cfg) {
 
 // ─────────────────────────────────────────────────────────
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(SERIAL_BAUD);
     delay(200);
+
+    // Load debug flag from NVS before first DBGLN
+    {
+        Preferences p;
+        p.begin("airmon", true);
+        g_debug_enabled = p.getBool("debug_en", false);
+        p.end();
+    }
+
     DBGLN("\n");
     DBGLN("╔══════════════════════════════╗");
     DBGLN("║   Air Monitor PRO  v" FW_VERSION "   ║");
@@ -90,6 +104,7 @@ void setup() {
     WifiManager::begin();
     WebServerModule::begin();
     MQTTModule::begin();
+    TelegramModule::init();  // Load Telegram settings from NVS
 
     SDLogger::loadHistory(g_hist24, g_hist7, g_hist30);
     DBGF("[Main] History: 24h=%d 7d=%d 30d=%d\n",
@@ -110,6 +125,42 @@ void setup() {
         WebServerModule::sendJSON(json);
     });
 
+    // REST fallback endpoint for live data (if WebSocket port 81 is blocked)
+    WebServerModule::registerRoute("/api/data", [&]() {
+        DynamicJsonDocument doc(768);
+        doc["type"]       = "data";
+        doc["temp"]       = g_data.temp;
+        doc["hum"]        = g_data.hum;
+        doc["co2"]        = g_data.co2;
+        doc["tvoc"]       = g_data.tvoc;
+        doc["aqi"]        = g_data.aqi;
+        doc["rssi"]       = g_status.rssi;
+        doc["sd"]         = g_status.sd_ok;
+        doc["sd_used"]    = g_status.sd_used_mb;
+        doc["sd_total"]   = g_status.sd_total_mb;
+        doc["sd_pct"]     = g_status.sd_pct;
+        doc["rtc"]        = g_status.rtc_ok;
+        doc["ens"]        = g_status.ens_ok;
+        doc["ens_status"] = Sensors::ensStatus();
+        doc["aht"]        = g_status.aht_ok;
+        doc["ip"]         = g_status.ip;
+        doc["uptime"]     = g_status.uptime;
+        doc["time_short"] = g_status.time_str;
+        doc["date"]       = g_status.date_str;
+        doc["ver"]        = FW_VERSION;
+        doc["warmup"]     = g_status.ens_warmup;
+        doc["warmup_pct"] = g_status.ens_warmup
+            ? min(100.0f,(float)(millis()/(ENS160_WARMUP_MS/100.0f)))
+            : 100.0f;
+        doc["mqtt"]       = MQTTModule::isConnected();
+        doc["tg"]         = TelegramModule::isEnabled();
+        doc["hist24_rev"] = g_status.hist24_rev;
+        doc["hist7_rev"]  = g_status.hist7_rev;
+        doc["hist30_rev"] = g_status.hist30_rev;
+        String out; serializeJson(doc,out);
+        WebServerModule::sendJSON(out);
+    });
+
     DBGLN("[Main] Setup complete");
 }
 
@@ -120,11 +171,25 @@ void loop() {
     WifiManager::loop();
     WebServerModule::loop();
 
-    static bool _tgStarted = false;
     if (WifiManager::isConnected()) {
         RTCModule::loop();
         MQTTModule::loop();
-        if (!_tgStarted) { _tgStarted = true; TelegramModule::begin(); }
+        
+        // Telegram: always check if it should be started (it may have been enabled via settings)
+        // IMPORTANT: Save state to local variable to avoid race condition with other threads
+        static bool _tgTaskStarted = false;
+        bool tgEnabled = TelegramModule::isEnabled();  // Safe snapshot
+        
+        if (!_tgTaskStarted && tgEnabled) {
+            _tgTaskStarted = true;
+            DBGLN("[Main] Starting Telegram module");
+            TelegramModule::begin();
+        }
+        // If disabled, reset the flag so it can start again if re-enabled
+        if (_tgTaskStarted && !tgEnabled) {
+            _tgTaskStarted = false;
+            DBGLN("[Main] Telegram module disabled");
+        }
         TelegramModule::loop(g_data, g_status);
     }
 
@@ -133,7 +198,6 @@ void loop() {
     g_data.ts = RTCModule::getEpoch();
     const bool timeValid = RTCModule::hasValidTime();
 
-    // Compute date/time once per iteration
     const String dateStr = RTCModule::getDateString();
     const String timeStr = RTCModule::getTimeString();
 

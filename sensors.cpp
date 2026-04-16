@@ -40,10 +40,11 @@ void begin() {
     Wire.begin(I2C_SDA, I2C_SCL);
     _startMs = millis();
 
-    bool ens52 = _probeI2C(0x52);
-    bool ens53 = _probeI2C(0x53);
-    DBGF("[Sensors] I2C probe ENS160: 0x52=%s 0x53=%s\n",
-         ens52 ? "OK" : "--", ens53 ? "OK" : "--");
+    bool ens52 = _probeI2C(ENS160_ADDR_LOW);
+    bool ens53 = _probeI2C(ENS160_ADDR_HIGH);
+    DBGF("[Sensors] I2C probe ENS160: 0x%02X=%s 0x%02X=%s\n",
+         ENS160_ADDR_LOW,  ens52 ? "OK" : "--",
+         ENS160_ADDR_HIGH, ens53 ? "OK" : "--");
 
     if (_aht.begin()) {
         _ahtOK = true;
